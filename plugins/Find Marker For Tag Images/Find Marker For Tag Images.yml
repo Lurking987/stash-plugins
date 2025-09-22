@@ -1,0 +1,13 @@
+name: Find Marker For Tag Images
+description: Script to update tag images based on a randomly matched scene marker.
+version: 0.1
+url: 
+exec:
+  - python
+  - "{pluginDir}/Find Marker For Tag Images.py"
+interface: raw
+tasks:
+  - name: 'Run Script and Apply'
+    description: Runs a script to attain tag image from a randomly matched marker
+    defaultArgs:
+      mode: run_script
