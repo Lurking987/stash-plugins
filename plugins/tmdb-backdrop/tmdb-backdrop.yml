@@ -1,0 +1,13 @@
+name: tmdb-backdrop
+description: Check for TMDB URL and display random backdrop as background image
+version: 0.1
+ui:
+  javascript:
+    - tmdb_ui.js
+  csp:
+    connect-src:
+      - https://api.themoviedb.org
+settings:
+  tmdbapikey:
+    displayName: TMDB API Key
+    type: STRING

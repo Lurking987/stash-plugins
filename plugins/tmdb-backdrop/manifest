@@ -1,0 +1,12 @@
+id: tmdb-backdrop
+name: TMDB Backdrops
+metadata:
+  description: Check for TMDB URL, grab a backdrop, and display backdrop as background image
+version: 0.1
+date: "2026-02-11 00:00:00"
+requires: []
+source_repository: https://lurking987.github.io/stash-plugins/main/index.yml
+files:
+- tmdb-backdrop.yml
+- tmdb_ui.js
+- README.md
