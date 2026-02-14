@@ -6,7 +6,7 @@ Custom stashapp plugins made by *Lurking987* also known as *JustLurking*, *JustL
 
 ## Plugins
 - Find Marker For Tag Images
-
+- TMDB Backdrops
 
 ## License
 
