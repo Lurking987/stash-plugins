@@ -5,8 +5,8 @@ Custom stashapp plugins made by *Lurking987* also known as *JustLurking*, *JustL
 
 
 ## Plugins
-- Find Marker For Tag Images
-- TMDB Backdrops
+- [Find Marker For Tag Images](https://github.com/Lurking987/stash-plugins/tree/main/plugins/Find%20Marker%20For%20Tag%20Images)
+- [TMDB Backdrops](plugins/tmdb-backdrop)
 
 ## License
 
