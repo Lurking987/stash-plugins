@@ -1,0 +1,13 @@
+id: Clear All Tag Covers
+name: Clear All Tag Covers
+metadata:
+  description: Clear the image cover for all tags.
+version: 0.1
+date: "2026-02-26 21:14:00"
+requires: []
+source_repository: https://lurking987.github.io/stash-plugins/main/index.yml
+files:
+- manifest
+- README.md
+- clear_tag_covers.py
+- Clear All Tag Covers.yml

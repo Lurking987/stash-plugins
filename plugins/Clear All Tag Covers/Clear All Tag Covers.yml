@@ -1,0 +1,12 @@
+name: Clear All Tag Covers
+description: Clear the image cover for all tags
+version: 0.1
+exec:
+  - python
+  - "{pluginDir}/clear_tag_covers.py"
+
+interface: raw
+
+tasks:
+  - name: "Clear All Tag Covers Task"
+    description: Removes the cover images for all tags in the database.
