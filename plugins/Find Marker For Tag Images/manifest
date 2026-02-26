@@ -2,8 +2,8 @@ id: Find Marker For Tag Images
 name: Assign Matching Random Marker Preview Video to Tag Images
 metadata:
   description: Script to find markers that match a tag and picks a random preview as the tag image
-version: 0.1
-date: "2025-09-05 00:00:00"
+version: 1.0
+date: "2026-02-25 20:20:00"
 requires: []
 source_repository: 
 files:
