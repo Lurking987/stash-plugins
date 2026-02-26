@@ -23,7 +23,7 @@
 
     const updateBackdrop = async (tmdbUrl) => {
         if (!apiKey) await getSettings();
-        if (!apiKey) return console.error("TMDB Plugin: No API Key found in settings.");
+        if (!apiKey) return;
 
         const idMatch = tmdbUrl.match(/(movie|tv|collection)\/(\d+)/);
         if (!idMatch) return;
@@ -33,11 +33,10 @@
             const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}/images?api_key=${apiKey}`);
             const data = await response.json();
             
-            if (data.backdrops && data.backdrops.length > 0) {
-                const randomIdx = Math.floor(Math.random() * data.backdrops.length);
-                const filePath = data.backdrops[randomIdx].file_path;
-                const imageUrl = `https://image.tmdb.org/t/p/original${filePath}`;
+            if (data.backdrops?.length > 0) {
+                const imageUrl = `https://image.tmdb.org/t/p/original${data.backdrops[Math.floor(Math.random() * data.backdrops.length)].file_path}`;
                 
+				// 1. Get or Create the style block
                 let styleBlock = document.getElementById('tmdb-dynamic-style');
                 if (!styleBlock) {
                     styleBlock = document.createElement('style');
@@ -45,38 +44,49 @@
                     document.head.appendChild(styleBlock);
                 }
 
-                // Target #group-page for the image and .detail-header for transparency
-                styleBlock.innerHTML = `
-                    #group-page { 
-                        background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url("${imageUrl}") !important; 
-                        background-size: cover !important;
-                        background-attachment: fixed !important;
-                        background-position: center !important;
-                        min-height: 100vh;
+                // 2. Start Fade Out: Only the background layer
+                const styleBase = `
+                    #group-page { position: relative; min-height: 100vh; background: transparent !important; }
+                    #group-page::before {
+                        content: "";
+                        position: fixed;
+                        top: 0; left: 0; width: 100%; height: 100%;
+                        z-index: -1;
+                        background-size: cover;
+                        background-attachment: fixed;
+                        background-position: center;
+                        transition: opacity 0.8s ease-in-out;
                     }
-                    #group-page .background-image-container {
-                        display: none !important;
-                    }
-                    /* Clear the header background to reveal the TMDB image */
-                    #group-page .detail-header {
-                        background-color: transparent !important;
-                        border-bottom: none !important; /* Optional: removes the bottom border line */
-                    }
-					#group-page .filtered-list-toolbar {
-						background-color: transparent !important;
-					}
-					#group-page .card {
-						background-color: transparent !important;
-						box-shadow: none !important;
-					}
-					#group-page .detail-body nav {
-						border-bottom: solid 0px;
-					}
                 `;
-                console.log("TMDB Plugin: Backdrop applied:", imageUrl);
+                
+                // Set opacity to 0 on the existing background layer
+                const currentStyle = styleBlock.innerHTML;
+                styleBlock.innerHTML = styleBase + currentStyle + `#group-page::before { opacity: 0 !important; }`;
+
+                // 3. Preload and Wait for fade out
+                await Promise.all([
+                    new Promise(resolve => setTimeout(resolve, 800)),
+                    new Promise(resolve => { const img = new Image(); img.src = imageUrl; img.onload = resolve; })
+                ]);
+
+                // 4. Update image and Fade In
+                styleBlock.innerHTML = `
+                    ${styleBase}
+                    #group-page::before { 
+                        background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url("${imageUrl}");
+                        opacity: 1 !important;
+                    }
+                    #group-page .background-image-container { display: none !important; }
+                    #group-page .detail-header, #group-page .filtered-list-toolbar, #group-page .card {
+                        background-color: transparent !important;
+                        box-shadow: none !important;
+                    }
+                    #group-page .detail-body nav { border-bottom: none !important; }
+                `;
             }
-        } catch (e) { console.error("TMDB Plugin API Error:", e); }
+        } catch (e) { console.error("TMDB Plugin Error:", e); }
     };
+
 
     async function updateDOM() {
         const match = window.location.pathname.match(/\/groups\/(\d+)/);
