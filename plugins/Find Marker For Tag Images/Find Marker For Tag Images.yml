@@ -1,13 +1,14 @@
 name: Find Marker For Tag Images
-description: Script to update tag images based on a randomly matched scene marker.
-version: 0.1
-url: 
+description: Associates random marker video endpoints as tag cover images.
+version: 1.0
+url: https://github.com/Lurking987/stash-plugins/tree/main/plugins/Find%20Marker%20For%20Tag%20Images
 exec:
   - python
   - "{pluginDir}/Find Marker For Tag Images.py"
 interface: raw
 tasks:
-  - name: 'Run Script and Apply'
-    description: Runs a script to attain tag image from a randomly matched marker
+  - name: Run Script and Apply
+    description: Clears current tag covers and links a random marker video stream.
     defaultArgs:
-      mode: run_script
+      mode: sync_all
+      force_overwrite: true
