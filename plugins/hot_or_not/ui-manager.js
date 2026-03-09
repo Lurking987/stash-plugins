@@ -1,8 +1,7 @@
 import { state } from './state.js';
 import { ALL_GENDERS } from './constants.js';
-import { graphqlQuery } from './api-client.js';
 import { parsePerformerEloData } from './math-utils.js';
-import { isBattleRankBadgeEnabled } from './api-client.js';
+import { graphqlQuery, getPerformerBattleRank, isBattleRankBadgeEnabled } from './api-client.js';
 import { formatDuration, getCountryDisplay, getGenderDisplay, escapeHtml } from './formatters.js';
 import { getUrlPerformerFilter } from './parsers.js';
 import { loadNewPair } from './battle-engine.js';
@@ -397,7 +396,30 @@ export function isOnSinglePerformerPage() {
 // Global flag to prevent double-injection
 let badgeInjectionInProgress = false;
 
+/**
+ * Internal Helper: Creates the physical badge element
+ */
+function createBattleRankBadge(rank, total, rating) {
+  const badge = document.createElement("div");
+  badge.id = "hon-battle-rank-badge";
+  badge.className = "hon-battle-rank-badge"; // Use this for CSS styling
+  
+  // Style it to look like a Stash badge
+  badge.innerHTML = `
+    <span class="hon-badge-icon">🔥</span>
+    <span class="hon-badge-text">
+      Rank <strong>#${rank}</strong> of ${total} 
+      <small>(${rating}/100)</small>
+    </span>
+  `;
+  return badge;
+}
+
+/**
+ * Main Injection Logic
+ */
 export async function injectBattleRankBadge() {
+    // 1. Guard clauses
     if (!await isBattleRankBadgeEnabled()) return;
     if (window._honBadgeInjectionInProgress || badgeInjectionInProgress) return;
 
@@ -406,25 +428,34 @@ export async function injectBattleRankBadge() {
     
     try {
       const performerId = getPerformerIdFromUrl();
+      // Only inject if we have an ID and it's not already there
       if (!performerId || document.getElementById("hon-battle-rank-badge")) return;
 
-      // Note: Ensure getPerformerBattleRank is imported from your api-client or defined here
-      const rankInfo = await graphqlQuery(`query($id:ID!){findPerformer(id:$id){rating100}}`, {id: performerId});
-      // This is a placeholder - you may need to import your actual rank fetcher here
+      // 2. Fetch actual rank data from api-client.js
+      const rankInfo = await getPerformerBattleRank(performerId);
+      if (!rankInfo) return;
+
+      // 3. Create the badge element
+      const badge = createBattleRankBadge(rankInfo.rank, rankInfo.total, rankInfo.rating);
+
+      // 4. Find the best place to put it
+      // We try the rating stars first, then the header
+      const target = document.querySelector(".rating-stars") || 
+                     document.querySelector(".performer-head") ||
+                     document.querySelector(".detail-header");
       
-      const badge = document.createElement("div");
-      badge.id = "hon-battle-rank-badge";
-      badge.className = "hon-badge";
-      badge.innerHTML = `⭐ Battle Rank`; // Simplified for brevity
+      if (target) {
+        target.appendChild(badge);
+      }
 
-      const target = document.querySelector(".rating-stars") || document.querySelector(".performer-head");
-      if (target) target.appendChild(badge);
-
+    } catch (err) {
+      console.error("[HotOrNot] Badge injection failed:", err);
     } finally {
       window._honBadgeInjectionInProgress = false;
       badgeInjectionInProgress = false;
     }
 }
+
 
 export function showRatingAnimation(card, oldRating, newRating, change, isWinner) {
     const overlay = document.createElement("div");
