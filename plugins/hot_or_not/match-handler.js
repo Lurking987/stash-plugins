@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { handleComparison, fetchPerformerById, updateItemRating } from './api-client.js';
-import { showRatingAnimation } from './ui-animations.js';
+import { showRatingAnimation } from './ui-manager.js';
 import { loadNewPair } from './battle-engine.js';
 import { showPlacementScreen } from './ui-manager.js';
 
