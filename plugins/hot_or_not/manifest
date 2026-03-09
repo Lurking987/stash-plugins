@@ -1,0 +1,23 @@
+id: hot_or_not
+name: HotOrNot_v3
+metadata:
+  description: Adds an ELO based ranking system for performers and images
+version: 3.0.0
+date: "2026-03-09 00:00:00"
+requires: []
+source_repository: 
+files:
+- api-client.js
+- battle-engine.js
+- constants.js
+- formatters.js 
+- gauntlet-selection.js
+- main.js
+- match-handler.js
+- math-utils.js
+- parsers.js
+- state.js
+- ui-manager.js
+- hot_or_not.yml
+- hot_or_not.css
+- README.md
