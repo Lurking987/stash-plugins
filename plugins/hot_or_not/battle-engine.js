@@ -2,14 +2,14 @@ import {
   graphqlQuery, SCENE_FRAGMENT, PERFORMER_FRAGMENT, IMAGE_FRAGMENT,
   fetchRandomScenes, fetchRandomPerformers, fetchRandomImages, fetchImageCount,
   updatePerformerRating, updateSceneRating, updateImageRating 
-} from './api.js';
-import { getRecencyWeight, weightedRandomSelect } from './random-logic.js';
+} from './api-client.js';
+import { getRecencyWeight, weightedRandomSelect } from './math-utils.js';
 import { getPerformerFilterForGender } from './parsers.js';
 import { state } from './state.js';
 import { 
   createSceneCard, createPerformerCard, createImageCard, 
   createVictoryScreen, renderCard 
-} from './ui-cards.js';
+} from './ui-manager.js';
 import { showPerformerSelection, showPlacementScreen } from './gauntlet-selection.js';
 import { handleChooseItem } from './match-handler.js';
 
