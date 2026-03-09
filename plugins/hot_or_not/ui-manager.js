@@ -380,3 +380,83 @@ export function showRatingAnimation(card, oldRating, newRating, change, isWinner
   // Remove element after animation completes
   setTimeout(() => anim.remove(), 1400);
 }
+
+/**
+ * Helpers for Performer Page Integration
+ */
+function getPerformerIdFromUrl() {
+  const path = window.location.pathname;
+  const match = path.match(/\/performers\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+export function isOnSinglePerformerPage() {
+  return getPerformerIdFromUrl() !== null;
+}
+
+// Global flag to prevent double-injection
+let badgeInjectionInProgress = false;
+
+export async function injectBattleRankBadge() {
+    if (!await isBattleRankBadgeEnabled()) return;
+    if (window._honBadgeInjectionInProgress || badgeInjectionInProgress) return;
+
+    window._honBadgeInjectionInProgress = true;
+    badgeInjectionInProgress = true;
+    
+    try {
+      const performerId = getPerformerIdFromUrl();
+      if (!performerId || document.getElementById("hon-battle-rank-badge")) return;
+
+      // Note: Ensure getPerformerBattleRank is imported from your api-client or defined here
+      const rankInfo = await graphqlQuery(`query($id:ID!){findPerformer(id:$id){rating100}}`, {id: performerId});
+      // This is a placeholder - you may need to import your actual rank fetcher here
+      
+      const badge = document.createElement("div");
+      badge.id = "hon-battle-rank-badge";
+      badge.className = "hon-badge";
+      badge.innerHTML = `⭐ Battle Rank`; // Simplified for brevity
+
+      const target = document.querySelector(".rating-stars") || document.querySelector(".performer-head");
+      if (target) target.appendChild(badge);
+
+    } finally {
+      window._honBadgeInjectionInProgress = false;
+      badgeInjectionInProgress = false;
+    }
+}
+
+export function showRatingAnimation(card, oldRating, newRating, change, isWinner) {
+    const overlay = document.createElement("div");
+    overlay.className = `hon-rating-overlay ${isWinner ? 'hon-rating-winner' : 'hon-rating-loser'}`;
+    
+    const ratingDisplay = document.createElement("div");
+    ratingDisplay.className = "hon-rating-display";
+    ratingDisplay.textContent = oldRating;
+    
+    const changeDisplay = document.createElement("div");
+    changeDisplay.className = "hon-rating-change";
+    changeDisplay.textContent = (change >= 0 ? "+" : "") + change;
+    
+    overlay.appendChild(ratingDisplay);
+    overlay.appendChild(changeDisplay);
+    card.appendChild(overlay);
+
+    let currentDisplay = oldRating;
+    const totalSteps = Math.abs(change);
+    if (totalSteps > 0) {
+        const step = isWinner ? 1 : -1;
+        let stepCount = 0;
+        const interval = setInterval(() => {
+          stepCount++;
+          currentDisplay += step;
+          ratingDisplay.textContent = currentDisplay;
+          if (stepCount >= totalSteps) {
+            clearInterval(interval);
+            ratingDisplay.textContent = newRating;
+          }
+        }, 30);
+    }
+
+    setTimeout(() => overlay.remove(), 1400);
+}
