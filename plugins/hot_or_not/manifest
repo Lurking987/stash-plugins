@@ -7,18 +7,7 @@ date: "2026-03-09 00:00:00"
 requires: []
 source_repository: 
 files:
-- api-client.js
-- battle-engine.js
-- constants.js
-- formatters.js 
-- gauntlet-selection.js
 - hot_or_not.js
-- main.js
-- match-handler.js
-- math-utils.js
-- parsers.js
-- state.js
-- ui-manager.js
 - hot_or_not.yml
 - hot_or_not.css
 - README.md
