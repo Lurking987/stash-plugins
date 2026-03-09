@@ -1,0 +1,24 @@
+name: HotOrNot_V3
+description: Adds an ELO based ranking system for performers and images
+version:3.0.0
+url: 
+ui:
+  javascript:
+    - api-client.js
+	- battle-engine.js
+	- constants.js
+	- formatters.js 
+	- gauntlet-selection.js
+	- main.js
+    - match-handler.js
+    - math-utils.js
+    - parsers.js
+    - state.js
+    - ui-manager.js
+  css:
+    - hot_or_not.css
+settings:
+  showBattleRankBadge:
+    displayName: Show Battle Rank Badge
+    description: Show a rank badge on individual performer pages. Enabled by default.
+    type: BOOLEAN

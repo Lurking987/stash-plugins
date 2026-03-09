@@ -1,0 +1,35 @@
+import { state } from './state.js';
+import { addFloatingButton, injectBattleRankBadge, isOnSinglePerformerPage } from './ui-manager.js';
+import { getUrlPerformerFilter } from './parsers.js';
+
+function init() {
+  console.log("[HotOrNot] Initialized");
+  
+  addFloatingButton();
+  if (isOnSinglePerformerPage()) {
+    setTimeout(() => injectBattleRankBadge(), 500);
+  }
+
+  // SPA Navigation handling
+  const observer = new MutationObserver(() => {
+    addFloatingButton();
+    if (isOnSinglePerformerPage() && !document.getElementById("hon-battle-rank-badge")) {
+      injectBattleRankBadge();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  if (typeof PluginApi !== 'undefined' && PluginApi.Event?.addEventListener) {
+    PluginApi.Event.addEventListener("stash:location", (e) => {
+      const path = e.detail.data.location.pathname;
+      if (['/performers', '/performers/'].includes(path)) {
+        state.cachedUrlFilter = getUrlPerformerFilter();
+      }
+      if (isOnSinglePerformerPage()) {
+        setTimeout(() => injectBattleRankBadge(), 500);
+      }
+    });
+  }
+}
+
+init();
