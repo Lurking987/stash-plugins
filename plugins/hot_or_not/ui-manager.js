@@ -380,4 +380,3 @@ export function showRatingAnimation(card, oldRating, newRating, change, isWinner
   // Remove element after animation completes
   setTimeout(() => anim.remove(), 1400);
 }
-
