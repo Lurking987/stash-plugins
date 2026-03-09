@@ -479,3 +479,9 @@ export function showRatingAnimation(card, oldRating, newRating, change, isWinner
 
     setTimeout(() => overlay.remove(), 1400);
 }
+
+function getPerformerIdFromUrl() {
+  const path = window.location.pathname;
+  const match = path.match(/\/performers\/(\d+)/);
+  return match ? match[1] : null;
+}
