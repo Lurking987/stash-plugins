@@ -167,3 +167,43 @@ export async function isBattleRankBadgeEnabled() {
   const config = await getHotOrNotConfig();
   return config.showBattleRankBadge !== false;
 }
+
+
+/**
+ * ============================================
+ * 6. CALCULATE RANK LOCALLY
+ * ============================================
+ */
+export async function getPerformerBattleRank(performerId) {
+  try {
+    // 1. Get all performers with ratings
+    const result = await graphqlQuery(`
+      query AllPerformersRatings {
+        allPerformers {
+          id
+          rating100
+        }
+      }
+    `);
+
+    const allPerformers = result.allPerformers || [];
+    // 2. Filter for those with ratings and sort descending
+    const ratedPerformers = allPerformers
+      .filter(p => p.rating100 !== null)
+      .sort((a, b) => b.rating100 - a.rating100);
+
+    const total = ratedPerformers.length;
+    const index = ratedPerformers.findIndex(p => p.id === performerId);
+
+    if (index === -1) return null;
+
+    return {
+      rank: index + 1,
+      total: total,
+      rating: ratedPerformers[index].rating100
+    };
+  } catch (err) {
+    console.error("[HotOrNot] Error calculating rank:", err);
+    return null;
+  }
+}
