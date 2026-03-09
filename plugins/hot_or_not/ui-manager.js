@@ -397,21 +397,13 @@ export function isOnSinglePerformerPage() {
 let badgeInjectionInProgress = false;
 
 /**
- * Internal Helper: Creates the physical badge element
+ * Internal helper to create the badge element
  */
 function createBattleRankBadge(rank, total, rating) {
   const badge = document.createElement("div");
   badge.id = "hon-battle-rank-badge";
-  badge.className = "hon-battle-rank-badge"; // Use this for CSS styling
-  
-  // Style it to look like a Stash badge
-  badge.innerHTML = `
-    <span class="hon-badge-icon">🔥</span>
-    <span class="hon-badge-text">
-      Rank <strong>#${rank}</strong> of ${total} 
-      <small>(${rating}/100)</small>
-    </span>
-  `;
+  badge.className = "hon-badge"; // Style this in your CSS
+  badge.innerHTML = `🔥 Rank #${rank} of ${total} (${rating}/100)`;
   return badge;
 }
 
@@ -419,41 +411,37 @@ function createBattleRankBadge(rank, total, rating) {
  * Main Injection Logic
  */
 export async function injectBattleRankBadge() {
-    // 1. Guard clauses
-    if (!await isBattleRankBadgeEnabled()) return;
-    if (window._honBadgeInjectionInProgress || badgeInjectionInProgress) return;
+  if (!await isBattleRankBadgeEnabled()) return;
+  if (window._honBadgeInjectionInProgress) return;
 
-    window._honBadgeInjectionInProgress = true;
-    badgeInjectionInProgress = true;
+  window._honBadgeInjectionInProgress = true;
+  try {
+    const performerId = getPerformerIdFromUrl();
+    if (!performerId || document.getElementById("hon-battle-rank-badge")) return;
+
+    const rankInfo = await getPerformerBattleRank(performerId);
+    if (!rankInfo) return;
+
+    const badge = createBattleRankBadge(rankInfo.rank, rankInfo.total, rankInfo.rating);
     
-    try {
-      const performerId = getPerformerIdFromUrl();
-      // Only inject if we have an ID and it's not already there
-      if (!performerId || document.getElementById("hon-battle-rank-badge")) return;
+    // Find injection point (Stash detail page header)
+    const target = document.querySelector(".rating-stars") || 
+                   document.querySelector(".performer-head") || 
+                   document.querySelector(".detail-header");
+    
+    if (target) target.appendChild(badge);
+  } finally {
+    window._honBadgeInjectionInProgress = false;
+  }
+}
 
-      // 2. Fetch actual rank data from api-client.js
-      const rankInfo = await getPerformerBattleRank(performerId);
-      if (!rankInfo) return;
+export function isOnSinglePerformerPage() {
+  return window.location.pathname.match(/\/performers\/\d+/) !== null;
+}
 
-      // 3. Create the badge element
-      const badge = createBattleRankBadge(rankInfo.rank, rankInfo.total, rankInfo.rating);
-
-      // 4. Find the best place to put it
-      // We try the rating stars first, then the header
-      const target = document.querySelector(".rating-stars") || 
-                     document.querySelector(".performer-head") ||
-                     document.querySelector(".detail-header");
-      
-      if (target) {
-        target.appendChild(badge);
-      }
-
-    } catch (err) {
-      console.error("[HotOrNot] Badge injection failed:", err);
-    } finally {
-      window._honBadgeInjectionInProgress = false;
-      badgeInjectionInProgress = false;
-    }
+function getPerformerIdFromUrl() {
+  const match = window.location.pathname.match(/\/performers\/(\d+)/);
+  return match ? match[1] : null;
 }
 
 
