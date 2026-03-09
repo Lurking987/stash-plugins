@@ -1541,3 +1541,68 @@
   border-color: #198754;
   color: #fff;
 }
+
+/* Container for the animation */
+.hon-rating-animation {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.85);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  color: white;
+  z-index: 1000;
+  pointer-events: none; /* Allows clicks to pass through */
+  animation: honFloatUp 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Individual Stat Styling */
+.hon-anim-old { font-size: 0.9rem; opacity: 0.7; text-decoration: line-through; }
+.hon-anim-new { font-size: 1.5rem; font-weight: bold; }
+.hon-anim-change { font-size: 1.1rem; font-weight: 600; }
+
+/* Color coding for Win/Loss */
+.hon-rating-animation.is-winner {
+  border: 2px solid #4ade80;
+}
+.hon-rating-animation.is-winner .hon-anim-change,
+.hon-rating-animation.is-winner .hon-anim-new {
+  color: #4ade80; /* Success Green */
+}
+
+.hon-rating-animation.is-loser {
+  border: 2px solid #f87171;
+}
+.hon-rating-animation.is-loser .hon-anim-change,
+.hon-rating-animation.is-loser .hon-anim-new {
+  color: #f87171; /* Danger Red */
+}
+
+/* The "Pop and Float" Keyframes */
+@keyframes honFloatUp {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1); /* Slight pop effect */
+  }
+  30% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -100%) scale(0.9); /* Fade out while moving up */
+  }
+}
