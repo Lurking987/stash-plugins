@@ -4,17 +4,7 @@ version: 3.0.0
 url: https://github.com/Lurking987/stash-plugins/pull/5
 ui: 
   javascript:
-    - main.js
-    - state.js
-    - ui-manager.js
-    - constants.js
-    - api-client.js
-    - gauntlet-selection.js
-    - match-handler.js
-    - formatters.js
-    - parsers.js
-    - battle-engine.js
-    - math-utils.js
+    - hot_or_not.js
   css:
     - hot_or_not.css
 settings:
