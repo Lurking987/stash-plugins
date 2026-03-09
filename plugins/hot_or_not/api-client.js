@@ -70,6 +70,53 @@ export async function fetchPerformerCount(filter = {}) {
   return result.findPerformers.count;
 }
 
+/**
+ * Fetches a performer's rating and calculates their rank among all performers
+ */
+export async function getPerformerBattleRank(performerId) {
+    try {
+        // 1. Get the specific performer's rating
+        const performerData = await graphqlQuery(`
+            query FindPerformer($id: ID!) {
+                findPerformer(id: $id) {
+                    id
+                    name
+                    rating100
+                }
+            }`, { id: performerId });
+
+        const performer = performerData.findPerformer;
+        if (!performer || !performer.rating100) return null;
+
+        // 2. Get all performers with ratings to calculate rank
+        // Note: For large libraries, you might want to cache this or use a specific aggregate query
+        const allRatingsData = await graphqlQuery(`
+            query AllPerformerRatings {
+                allPerformers {
+                    rating100
+                }
+            }`);
+
+        const ratings = allRatingsData.allPerformers
+            .map(p => p.rating100)
+            .filter(r => r != null)
+            .sort((a, b) => b - a);
+
+        const rank = ratings.indexOf(performer.rating100) + 1;
+        const total = ratings.length;
+
+        return {
+            rank,
+            total,
+            rating: performer.rating100,
+            stats: `${rank} / ${total}`
+        };
+    } catch (err) {
+        console.error("[HotOrNot] Error fetching battle rank:", err);
+        return null;
+    }
+}
+
 // ... include your fetchRandomPerformers, fetchImageCount, and fetchRandomImages here
 
 /**
