@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { ALL_GENDERS } from './constants.js';
 import { graphqlQuery } from './api-client.js';
 import { parsePerformerEloData } from './math-utils.js';
-import { isBattleRankBadgeEnabled } from './services.js';
+import { isBattleRankBadgeEnabled } from './api-client.js';
 import { formatDuration, getCountryDisplay, getGenderDisplay, escapeHtml } from './formatters.js';
 import { getUrlPerformerFilter } from './parsers.js';
 import { loadNewPair } from './battle-engine.js';
@@ -380,3 +380,4 @@ export function showRatingAnimation(card, oldRating, newRating, change, isWinner
   // Remove element after animation completes
   setTimeout(() => anim.remove(), 1400);
 }
+
