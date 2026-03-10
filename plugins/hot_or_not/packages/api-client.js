@@ -1,5 +1,6 @@
 import { getPerformerFilter } from './parsers.js';
-import { parsePerformerEloData, updatePerformerStats } from './math-utils.js';
+import { parsePerformerEloData, updatePerformerStats, getKFactor, isActiveParticipant } from './math-utils.js';
+import { state } from './state.js';
 
 /**
  * ============================================
@@ -70,56 +71,81 @@ export async function fetchPerformerCount(filter = {}) {
   return result.findPerformers.count;
 }
 
+export async function fetchRandomImages(count = 2) {
+  const totalImages = await fetchImageCount();
+  if (totalImages < 2) {
+    throw new Error("Not enough images for comparison. You need at least 2 images.");
+  }
+
+  const imagesQuery = `
+    query FindRandomImages($filter: FindFilterType) {
+      findImages(filter: $filter) {
+        images {
+          ${IMAGE_FRAGMENT}
+        }
+      }
+    }
+  `;
+
+  const result = await graphqlQuery(imagesQuery, {
+    filter: {
+      per_page: Math.min(100, totalImages),
+      sort: "random"
+    }
+  });
+
+  const allImages = result.findImages.images || [];
+    
+  if (allImages.length < 2) {
+    throw new Error("Not enough images returned from query.");
+  }
+
+  const shuffled = allImages.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 2);
+}
+
 // ... include your fetchRandomPerformers, fetchImageCount, and fetchRandomImages here
 export async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null) {
     const winnerRating = winnerCurrentRating || 50;
     const loserRating = loserCurrentRating || 50;
-    
     const ratingDiff = loserRating - winnerRating;
     
-    // Fetch fresh performer data to ensure we have current stats
-    // This prevents stats from being overwritten when performers have consecutive matches
     let freshWinnerObj = winnerObj;
     let freshLoserObj = loserObj;
     
-    if (battleType === "performers") {
-      // Fetch both performers in parallel for better performance
+    if (state.battleType === "performers") {
       const [fetchedWinner, fetchedLoser] = await Promise.all([
         (winnerObj && winnerId) ? fetchPerformerById(winnerId) : Promise.resolve(null),
         (loserObj && loserId) ? fetchPerformerById(loserId) : Promise.resolve(null)
       ]);
-      
       freshWinnerObj = fetchedWinner || winnerObj;
       freshLoserObj = fetchedLoser || loserObj;
     }
     
-    // Parse match counts from custom fields (only for performers)
     let winnerMatchCount = null;
     let loserMatchCount = null;
-    if (battleType === "performers" && freshWinnerObj) {
+    if (state.battleType === "performers" && freshWinnerObj) {
       const winnerStats = parsePerformerEloData(freshWinnerObj);
       winnerMatchCount = winnerStats.total_matches;
     }
-    if (battleType === "performers" && freshLoserObj) {
+    if (state.battleType === "performers" && freshLoserObj) {
       const loserStats = parsePerformerEloData(freshLoserObj);
       loserMatchCount = loserStats.total_matches;
     }
     
     let winnerGain = 0, loserLoss = 0;
     
-    if (currentMode === "gauntlet") {
-      // In gauntlet, only the champion/falling scene changes rating
-      // Defenders stay the same (they're just benchmarks)
-      // EXCEPT: if the defender is rank #1, they lose 1 point when defeated
-      const isChampionWinner = gauntletChampion && winnerId === gauntletChampion.id;
-      const isFallingWinner = gauntletFalling && gauntletFallingItem && winnerId === gauntletFallingItem.id;
-      const isChampionLoser = gauntletChampion && loserId === gauntletChampion.id;
-      const isFallingLoser = gauntletFalling && gauntletFallingItem && loserId === gauntletFallingItem.id;
+    // FIX: Changed currentMode to state.currentMode
+    if (state.currentMode === "gauntlet") {
+      // FIX: Added state. to gauntletChampion, gauntletFalling, etc.
+      const isChampionWinner = state.gauntletChampion && winnerId === state.gauntletChampion.id;
+      const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
+      const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
+      const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
       
       const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
       const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
       
-      // Only the active scene (champion or falling) gets rating changes
       if (isChampionWinner || isFallingWinner) {
         winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
       }
@@ -127,31 +153,22 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
         loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
       }
       
-      // Special case: if defender was rank #1 and lost, drop their rating by 1
       if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
         loserLoss = 1;
       }
-    } else if (currentMode === "champion") {
-      // Champion mode: Both performers get rating updates, but at a reduced rate (50% of Swiss mode)
-      // This allows rankings to evolve while still maintaining the "winner stays on" feel
+    // FIX: Changed currentMode to state.currentMode
+    } else if (state.currentMode === "champion") {
       const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
-      
-      // Use individual K-factors for each performer with champion mode multiplier
       const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
       const loserK = getKFactor(loserRating, loserMatchCount, "champion");
       
-      // Calculate changes using their respective K-factors (reduced by 50% for champion mode)
       winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
       loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
     } else {
-      // Swiss mode: True ELO - both change based on expected outcome
       const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
-      
-      // Use individual K-factors for each performer for more accurate adjustments
       const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
       const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
       
-      // Calculate changes using their respective K-factors
       winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
       loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
     }
@@ -162,44 +179,33 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     const winnerChange = newWinnerRating - winnerRating;
     const loserChange = newLoserRating - loserRating;
     
-    // Determine which participants should have stats tracked
-    const winnerRank = winnerId === currentPair.left?.id ? currentRanks.left : currentRanks.right;
+    // FIX: Added state. to currentPair and currentRanks
+    const winnerRank = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
     
-    // In champion/gauntlet mode with no champion yet (first match), both participants should get full stats tracked
-    const isFirstMatchInGauntletMode = (currentMode === "gauntlet" || currentMode === "champion") && !gauntletChampion;
-    const shouldTrackWinner = battleType === "performers" && (isActiveParticipant(winnerId, winnerRank) || isFirstMatchInGauntletMode);
-    const shouldTrackLoser = battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchInGauntletMode);
+    // FIX: Added state. to currentMode and gauntletChampion
+    const isFirstMatchInGauntletMode = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
+    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, winnerRank) || isFirstMatchInGauntletMode);
+    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchInGauntletMode);
     
-    // Update items in Stash
-    // Pass win/loss status for stats tracking:
-    // - true/false for active participants (track full stats)
-    // - null for defenders in gauntlet mode only (track participation only)
-    
-    // Winner updates
-    if (winnerChange !== 0 || (battleType === "performers" && freshWinnerObj && shouldTrackWinner)) {
-      // Update rating if changed, or always update stats if active participant
+    if (winnerChange !== 0 || (state.battleType === "performers" && freshWinnerObj && shouldTrackWinner)) {
       updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, shouldTrackWinner ? true : null);
-    } else if (battleType === "performers" && freshWinnerObj && currentMode === "gauntlet") {
-      // Defender in gauntlet mode only - track participation only
+    } else if (state.battleType === "performers" && freshWinnerObj && state.currentMode === "gauntlet") {
       updateItemRating(winnerId, newWinnerRating, freshWinnerObj, null);
     }
     
-    // Loser updates
-    if (loserChange !== 0 || (battleType === "performers" && freshLoserObj && shouldTrackLoser)) {
-      // Update rating if changed, or always update stats if active participant
+    if (loserChange !== 0 || (state.battleType === "performers" && freshLoserObj && shouldTrackLoser)) {
       updateItemRating(loserId, newLoserRating, shouldTrackLoser ? freshLoserObj : null, shouldTrackLoser ? false : null);
-    } else if (battleType === "performers" && freshLoserObj && currentMode === "gauntlet") {
-      // Defender in gauntlet mode only - track participation only
+    } else if (state.battleType === "performers" && freshLoserObj && state.currentMode === "gauntlet") {
       updateItemRating(loserId, newLoserRating, freshLoserObj, null);
     }
     
     return { newWinnerRating, newLoserRating, winnerChange, loserChange };
-  }
+}
   
 export async function updateItemRating(itemId, newRating, itemObj = null, won = null) {
-    if (battleType === "performers") {
+    if (state.battleType === "performers") {
       return await updatePerformerRating(itemId, newRating, itemObj, won);
-    } else if (battleType === "images") {
+    } else if (state.battleType === "images") {
       return await updateImageRating(itemId, newRating);
     } else {
       return await updateSceneRating(itemId, newRating);
@@ -207,14 +213,20 @@ export async function updateItemRating(itemId, newRating, itemObj = null, won = 
   }
   
 export async function fetchRandomPerformers(count = 2) {
-  if (selectedGenders.length === 0) {
-    throw new Error("No genders selected. Please select at least one gender in the filter.");
+  // Use state.selectedGenders, NEVER just selectedGenders
+  if (state.selectedGenders.length === 0) {
+    throw new Error("No genders selected.");
   }
-  const battleGender = selectedGenders[Math.floor(Math.random() * selectedGenders.length)];
-  const performerFilter = getPerformerFilterForGender(battleGender);
+  
+  const battleGender = state.selectedGenders[Math.floor(Math.random() * state.selectedGenders.length)];
+  
+  // FIX: Use the imported getPerformerFilter and pass the required arguments
+  // We wrap battleGender in an array [battleGender] because the parser expects a list
+  const performerFilter = getPerformerFilter(state.cachedUrlFilter, [battleGender]);
+  
   const totalPerformers = await fetchPerformerCount(performerFilter);
   if (totalPerformers < 2) {
-    throw new Error("Not enough performers for comparison. You need at least 2 performers matching the selected gender.");
+    throw new Error("Not enough performers matching the selected gender.");
   }
 
   const performerQuery = `
@@ -235,48 +247,16 @@ export async function fetchRandomPerformers(count = 2) {
     }
   });
 
-  const allPerformers = result.findPerformers.performers || [];
+  const allPerformers = result?.findPerformers?.performers || [];
   
   if (allPerformers.length < 2) {
-    throw new Error("Not enough performers for comparison. You need at least 2 performers.");
+    throw new Error("Not enough performers for comparison.");
   }
 
-  const shuffled = allPerformers.sort(() => Math.random() - 0.5);
+  const shuffled = [...allPerformers].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 2);
 }
 
-export async function fetchRandomImages(count = 2) {
-    const totalImages = await fetchImageCount();
-    if (totalImages < 2) {
-      throw new Error("Not enough images for comparison. You need at least 2 images.");
-    }
-
-    const imagesQuery = `
-      query FindRandomImages($filter: FindFilterType) {
-        findImages(filter: $filter) {
-          images {
-            ${IMAGE_FRAGMENT}
-          }
-        }
-      }
-    `;
-
-    const result = await graphqlQuery(imagesQuery, {
-      filter: {
-        per_page: Math.min(100, totalImages),
-        sort: "random"
-      }
-    });
-
-    const allImages = result.findImages.images || [];
-    
-    if (allImages.length < 2) {
-      throw new Error("Not enough images returned from query.");
-    }
-
-    const shuffled = allImages.sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, 2);
-}
 
 export async function fetchImageCount() {
     const countQuery = `
@@ -308,17 +288,18 @@ export async function fetchAllPerformerStats() {
         const result = await graphqlQuery(query);
         const performers = result.allPerformers || [];
         
-        // We filter for performers that actually have HotOrNot data (rating100)
-        // and parse their stats from the details field (or wherever your ELO is stored)
-        return performers
-            .filter(p => p.rating100 !== null)
-            .sort((a, b) => b.rating100 - a.rating100);
+        // REMOVED the filter so unrated performers (null) show up
+        // We still sort them, treating null as 50
+        return performers.sort((a, b) => {
+            const rA = a.rating100 ?? 50;
+            const rB = b.rating100 ?? 50;
+            return rB - rA;
+        });
     } catch (err) {
         console.error("[HotOrNot] Failed to fetch all performer stats:", err);
         throw err;
     }
-}
-  
+}  
   
 /**
  * ============================================
