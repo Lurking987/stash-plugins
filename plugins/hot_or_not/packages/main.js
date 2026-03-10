@@ -4,6 +4,7 @@ import * as Gauntlet from './gauntlet-selection.js';
 import * as Match from './match-handler.js';
 import * as API from './api-client.js';
 import { getUrlPerformerFilter } from './parsers.js'; 
+import './hotornot.css';
 
 window.openRankingModal = UI.openRankingModal;
 window.openStatsModal = UI.openStatsModal;

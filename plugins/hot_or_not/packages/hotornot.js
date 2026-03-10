@@ -1,3 +1,5 @@
+import './hotornot.css';
+
 (async () => {
     try {
         // Prevent double loading

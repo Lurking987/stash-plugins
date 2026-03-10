@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "build": "esbuild main.js --bundle --format=iife --platform=browser --outfile=hot_or_not.js",
-    "watch": "esbuild main.js --bundle --format=iife --platform=browser --outfile=hot_or_not.js --watch",
+    "watch": "esbuild main.js --bundle --format=iife --outfile=hot_or_not.js --watch",
     "minify": "esbuild main.js --bundle --minify --format=iife --platform=browser --outfile=hot_or_not.min.js"
   },
   "devDependencies": {
