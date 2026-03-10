@@ -6,8 +6,8 @@ import { loadNewPair } from './battle-engine.js';
 /**
  * Fetches potential champions to start a Gauntlet
  */
-export async function fetchPerformersForSelection(count = 5) {
-  const filter = getPerformerFilter();
+export async function fetchPerformersForSelection(count = 2) {
+  const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
   const total = await fetchPerformerCount(filter);
   const actualCount = Math.min(count, total);
 
@@ -54,7 +54,7 @@ export async function loadPerformerSelection() {
   if (!listEl) return;
 
   try {
-    const performers = await fetchPerformersForSelection(5);
+    const performers = await fetchPerformersForSelection(2);
     listEl.innerHTML = performers.map(p => createSelectionCard(p)).join('');
     
     listEl.querySelectorAll('.hon-selection-card').forEach(card => {
@@ -88,17 +88,28 @@ function startGauntletWithPerformer(performer) {
  */
 export function showPerformerSelection() {
   const selectionContainer = document.getElementById("hon-performer-selection");
-  if (selectionContainer) {
-    selectionContainer.style.display = "block";
-    loadPerformerSelection();
-  }
-  
-  // Hide the comparison area until a performer is selected
   const comparisonArea = document.getElementById("hon-comparison-area");
   const actionsEl = document.querySelector(".hon-actions");
+
+  // 1. Toggle visibility
+  if (selectionContainer) {
+    selectionContainer.style.display = "block";
+    // 2. Trigger the data fetch (This keeps the rest of your code alive in the bundle)
+    loadPerformerSelection(); 
+  }
+  
   if (comparisonArea) comparisonArea.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
+
+  // 3. Fix the "mainContainer" error from before:
+  // Instead of mainContainer.classList.remove(...), we use the modal ID
+  const modal = document.getElementById("hon-modal");
+  if (modal) {
+    modal.classList.remove("hon-mode-champion", "hon-mode-swiss");
+    modal.classList.add("hon-mode-gauntlet");
+  }
 }
+
 
  export function showPlacementScreen(item, rank, finalRating) {
     const comparisonArea = document.getElementById("hon-comparison-area");

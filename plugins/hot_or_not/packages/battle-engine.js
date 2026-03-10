@@ -4,7 +4,7 @@ import {
   updatePerformerRating, updateSceneRating, updateImageRating 
 } from './api-client.js';
 import { getRecencyWeight, weightedRandomSelect } from './math-utils.js';
-import { getPerformerFilterForGender } from './parsers.js';
+import { getPerformerFilterForGender, getPerformerFilter } from './parsers.js';
 import { state } from './state.js';
 import { 
   createSceneCard, createPerformerCard, createImageCard, 
@@ -20,7 +20,7 @@ export async function fetchPair() {
   const { battleType, currentMode, selectedGenders } = state;
 
   if (currentMode === "swiss") {
-    if (battleType === "performers") return await fetchSwissPairPerformers(selectedGenders);
+    if (battleType === "performers") return await fetchSwissPairPerformers(state.selectedGenders);
     if (battleType === "images") return await fetchSwissPairImages();
     return await fetchSwissPairScenes();
   }
@@ -196,8 +196,10 @@ export async function fetchChampionPairScenes() {
  * ============================================
  */
 
-export async function fetchSwissPairPerformers(selectedGenders) {
-  const performerFilter = getPerformerFilterForGender(selectedGenders[Math.floor(Math.random() * selectedGenders.length)]);
+export async function fetchSwissPairPerformers() {
+  const genders = state.selectedGenders;
+  const randomGender = state.selectedGenders[Math.floor(Math.random() * state.selectedGenders.length)];
+  const performerFilter = getPerformerFilter(state.cachedUrlFilter, [randomGender]);
   const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
   }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
@@ -217,7 +219,7 @@ export async function fetchSwissPairPerformers(selectedGenders) {
 
 export async function fetchGauntletPairPerformers() {
   const gender = state.gauntletChampion?.gender || state.selectedGenders[0];
-  const performerFilter = getPerformerFilterForGender(gender);
+  const performerFilter = getPerformerFilter(state.cachedUrlFilter, [gender]);
   
   const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { count, performers { ${PERFORMER_FRAGMENT} } }

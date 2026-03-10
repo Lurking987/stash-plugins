@@ -26,7 +26,7 @@ export const state = {
   cachedUrlFilter: null,
   badgeInjectionInProgress: false,
   pluginConfigCache: null,
-  selectedGenders: ["FEMALE", "TRANSGENDER_MALE", "TRANSGENDER_FEMALE", "INTERSEX", "NON_BINARY"]
+  selectedGenders: ["FEMALE", "NON_BINARY"]
 };
 
 /**

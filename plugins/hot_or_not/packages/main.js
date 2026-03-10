@@ -1,65 +1,51 @@
 import { state } from './state.js';
-import { 
-    addFloatingButton, 
-    injectBattleRankBadge, 
-    isOnSinglePerformerPage, 
-    openRankingModal, 
-	openStatsModal,
-	handleGenderToggle
-} from './ui-manager.js';
-import { getUrlPerformerFilter } from './parsers.js';
-import { handleChooseItem } from './match-handler.js';
+import * as UI from './ui-manager.js';
+import * as Gauntlet from './gauntlet-selection.js';
+import * as Match from './match-handler.js';
+import * as API from './api-client.js';
+import { getUrlPerformerFilter } from './parsers.js'; 
 
-export function main() { 
-  // Prevent double initialization if Stash re-injects the script
-  if (window.honLoaded) return; 
+window.openRankingModal = UI.openRankingModal;
+window.openStatsModal = UI.openStatsModal;
+window.closeRankingModal = UI.closeRankingModal;
+window.handleGenderToggle = UI.handleGenderToggle;
+window.showPerformerSelection = Gauntlet.showPerformerSelection;
+window.handleChooseItem = Match.handleChooseItem;
+
+export function main() {
+  if (window.honLoaded) return;
   window.honLoaded = true;
-
-  console.log("[HotOrNot] Initialized");
+  console.log("[HotOrNot] Global Scope Initialized");
   
-  // 1. Expose to Global Scope so HTML 'onclick' can find them
-  window.handleChooseItem = handleChooseItem;
-  window.openRankingModal = openRankingModal;
-  window.openStatsModal = openStatsModal;
-  window.handleGenderToggle = handleGenderToggle;
+  UI.addFloatingButton();
   
-  // 2. Initial Run
-  addFloatingButton();
-  if (isOnSinglePerformerPage()) {
-    setTimeout(() => injectBattleRankBadge(), 500);
+  // Use the UI namespace for these calls too!
+  if (UI.isOnSinglePerformerPage()) {
+    setTimeout(() => UI.injectBattleRankBadge(), 1000);
   }
 
-  // 3. SPA Navigation handling (Mutation Observer)
-  // This ensures the floating button and rank badge appear as you click through Stash
   const observer = new MutationObserver(() => {
     if (!document.getElementById("hon-floating-btn")) {
-        addFloatingButton();
+        UI.addFloatingButton();
     }
-    
-    if (isOnSinglePerformerPage() && !document.getElementById("hon-battle-rank-badge")) {
-      injectBattleRankBadge();
+    if (UI.isOnSinglePerformerPage() && !document.getElementById("hon-battle-rank-badge")) {
+      UI.injectBattleRankBadge();
     }
   });
   
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // 4. Stash Location Events
   if (typeof PluginApi !== 'undefined' && PluginApi.Event?.addEventListener) {
     PluginApi.Event.addEventListener("stash:location", (e) => {
       const path = e.detail?.data?.location?.pathname || "";
-      
-      // Update filters when navigating to performer list
       if (path.includes('/performers')) {
         state.cachedUrlFilter = getUrlPerformerFilter();
       }
-      
-      // Re-inject badge on performer detail pages
-      if (isOnSinglePerformerPage()) {
-        setTimeout(() => injectBattleRankBadge(), 500);
+      if (UI.isOnSinglePerformerPage()) {
+        setTimeout(() => UI.injectBattleRankBadge(), 1000);
       }
     });
   }
 }
 
-// Start the plugin logic
 main();

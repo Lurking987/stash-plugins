@@ -358,31 +358,50 @@ export async function isBattleRankBadgeEnabled() {
  */
 export async function getPerformerBattleRank(performerId) {
   try {
-    // 1. Get all performers with ratings
+    // 1. Fetch ratings for ranking AND the target performer's custom fields
     const result = await graphqlQuery(`
-      query AllPerformersRatings {
+      query AllPerformersAndTargetStats($id: ID!) {
         allPerformers {
           id
           rating100
         }
+        findPerformer(id: $id) {
+          custom_fields
+        }
       }
-    `);
+    `, { id: performerId });
 
     const allPerformers = result.allPerformers || [];
-    // 2. Filter for those with ratings and sort descending
+    const targetPerformer = result.findPerformer;
+
+    // 2. Filter for those with ratings and sort descending to calculate Rank
     const ratedPerformers = allPerformers
       .filter(p => p.rating100 !== null)
-      .sort((a, b) => b.rating100 - a.rating100);
+      .sort((a, b) => (b.rating100 || 0) - (a.rating100 || 0));
 
     const total = ratedPerformers.length;
     const index = ratedPerformers.findIndex(p => p.id === performerId);
 
     if (index === -1) return null;
 
+    // 3. Parse the Stats JSON string from the custom field 'hotornot_stats'
+    let stats = null;
+    const statsJson = targetPerformer?.custom_fields?.hotornot_stats;
+    
+    if (statsJson) {
+      try {
+        // Since it's saved as a JSON string, we must parse it into an object
+        stats = typeof statsJson === 'string' ? JSON.parse(statsJson) : statsJson;
+      } catch (e) {
+        console.warn("[HotOrNot] Could not parse hotornot_stats for performer:", performerId);
+      }
+    }
+
     return {
       rank: index + 1,
       total: total,
-      rating: ratedPerformers[index].rating100
+      rating: ratedPerformers[index].rating100,
+      stats: stats // This is now the object { wins: X, losses: Y, ... }
     };
   } catch (err) {
     console.error("[HotOrNot] Error calculating rank:", err);

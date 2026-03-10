@@ -205,13 +205,26 @@ export function handleGenderToggle(gender) {
   loadNewPair();
 }
 
+export function setMode(mode) {
+  // 1. Hide ALL possible areas first
+  document.getElementById("hon-performer-selection").style.display = "none";
+  document.getElementById("hon-comparison-area").style.display = "none";
+  // ... hide others
+
+  // 2. Show only the one for the selected mode
+  if (mode === 'gauntlet') {
+    showPerformerSelection(); // from gauntlet-selection.js
+  } else if (mode === 'champion') {
+    showChampionMode(); 
+  }
+}
+
 
 /**
  * ============================================
  * 3. NAVIGATION & MODAL CONTROL
  * ============================================
  */
-
 export function shouldShowButton() {
   return ['/performers', '/performers/', '/images', '/images/'].includes(window.location.pathname);
 }
@@ -223,115 +236,101 @@ export function addFloatingButton() {
   const btn = document.createElement("button");
   btn.id = "hon-floating-btn";
   btn.innerHTML = "🔥";
-  btn.onclick = openRankingModal;
+  // FIX: Use the window global so the click works in the bundle
+  btn.onclick = () => window.openRankingModal(); 
   document.body.appendChild(btn);
+  btn.setAttribute("onclick", "window.openRankingModal()");
+}
+
+// Move this outside so closeRankingModal can see it to remove it
+function handleGlobalKeys(e) {
+  const activeModal = document.getElementById("hon-modal-container");
+  if (!activeModal) {
+    document.removeEventListener("keydown", handleGlobalKeys);
+    return;
+  }
+
+  const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
+  if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+
+    if (e.key === "ArrowLeft") {
+      activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+    }
+    if (e.key === "ArrowRight") {
+      activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+    }
+    if (e.key === " " || e.code === "Space") {
+      document.getElementById("hon-skip-btn")?.click();
+    }
+  }
 }
 
 export function openRankingModal() {
-    // 1. Update state using the 'state' object
-    const path = window.location.pathname;
-    if (path.includes('/images')) {
-        state.battleType = "images";
-        state.currentMode = "swiss";
-        state.cachedUrlFilter = null;
-    } else {
-        state.battleType = "performers";
-        state.cachedUrlFilter = getUrlPerformerFilter();
-    }
+    try {
+        const path = window.location.pathname;
+        state.battleType = path.includes('/images') ? "images" : "performers";
+        if (state.battleType === "performers") {
+            state.cachedUrlFilter = getUrlPerformerFilter();
+        }
 
-    // 2. Clear existing modal
-    const existingModal = document.getElementById("hon-modal");
-    if (existingModal) existingModal.remove();
+        const existing = document.getElementById("hon-modal");
+        if (existing) existing.remove();
 
-    // 3. Create Modal
-    const modal = document.createElement("div");
-    modal.id = "hon-modal";
-    modal.innerHTML = `
-      <div class="hon-modal-backdrop"></div>
-      <div class="hon-modal-content">
-        <button class="hon-modal-close">✕</button>
-        ${createMainUI()}
-      </div>
-    `;
-    document.body.appendChild(modal);
+        const modal = document.createElement("div");
+        modal.id = "hon-modal";
+        
+        modal.innerHTML = `
+          <div class="hon-modal-backdrop"></div>
+          <div class="hon-modal-content">
+            <span class="hon-modal-close">✕</span>
+            ${createMainUI()}
+          </div>
+        `;
+        document.body.appendChild(modal);
 
-    // 4. Mode Toggles
-    modal.querySelectorAll(".hon-mode-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-            if (state.battleType === "images") return;
-            const newMode = btn.dataset.mode;
-            if (newMode !== state.currentMode) {
+        // --- MOVE THESE HERE (Inside the block where modal exists) ---
+        modal.style.display = "block";
+        
+        modal.querySelector(".hon-modal-close").onclick = () => closeRankingModal();
+        modal.querySelector(".hon-modal-backdrop").onclick = () => closeRankingModal();
+
+        // 4. Mode Buttons
+        modal.querySelectorAll(".hon-mode-btn").forEach((btn) => {
+            btn.onclick = () => {
+                const newMode = btn.dataset.mode;
                 state.currentMode = newMode;
-                // Reset gauntlet state on the state object
-                state.gauntletChampion = null;
-                state.gauntletWins = 0;
-                state.gauntletDefeated = [];
-                
                 modal.querySelectorAll(".hon-mode-btn").forEach(b => 
                     b.classList.toggle("active", b.dataset.mode === state.currentMode)
                 );
-                loadNewPair();
-            }
+                
+                if (newMode === "gauntlet") {
+                    window.showPerformerSelection();
+                } else {
+                    loadNewPair();
+                }
+            };
         });
-    });
 
-    // 5. Skip Button
-    const skipBtn = modal.querySelector("#hon-skip-btn");
-    if (skipBtn) {
-        skipBtn.addEventListener("click", () => {
-            if (state.disableChoice) return;
-            // logic for resetting gauntlet on skip
-            if (state.battleType === "performers" && (state.currentMode === "gauntlet" || state.currentMode === "champion")) {
-                state.gauntletChampion = null;
-                state.gauntletWins = 0;
-            }
-            state.disableChoice = true;
+        document.addEventListener("keydown", handleGlobalKeys);
+        
+        if (state.currentMode === "gauntlet") {
+            window.showPerformerSelection();
+        } else {
             loadNewPair();
-        });
+        }
+
+    } catch (err) {
+        console.error("CRASH in openRankingModal:", err);
     }
-
-    // 6. Define Close Logic
-    const close = () => {
-        modal.remove();
-        // Remove keyboard listeners when modal closes
-        document.removeEventListener("keydown", handleGlobalKeys);
-    };
-
-    // 7. Keyboard Handler (Internal so it can be removed)
-    function handleGlobalKeys(e) {
-      const modal = document.getElementById("hon-modal");
-      if (!modal) {
-      document.removeEventListener("keydown", handleGlobalKeys);
-      return;
-      }
-
-      // List of keys we want to "steal" from Stash
-      const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
-  
-      if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
-        // STOP STASH FROM SEEING THE KEY
-        e.stopImmediatePropagation();
-        e.preventDefault();
-
-        if (e.key === "ArrowLeft") {
-          modal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
-        }
-        if (e.key === "ArrowRight") {
-          modal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
-        }
-        if (e.key === " " || e.code === "Space") {
-          document.getElementById("hon-skip-btn")?.click();
-        }
-      }
-    }
+}
 
 
-    document.addEventListener("keydown", handleGlobalKeys);
-    modal.querySelector(".hon-modal-backdrop").onclick = close;
-    modal.querySelector(".hon-modal-close").onclick = close;
-
-    // Start
-    loadNewPair();
+export function closeRankingModal() {
+    const modal = document.getElementById("hon-modal");
+    if (modal) modal.remove();
+    document.removeEventListener("keydown", handleGlobalKeys);
 }
 
 /**
@@ -526,15 +525,84 @@ export function isOnSinglePerformerPage() {
 let badgeInjectionInProgress = false;
 
 /**
- * Internal helper to create the badge element
+ * Creates the detailed Battle Rank badge with tiers and match statistics
  */
-function createBattleRankBadge(rank, total, rating) {
+export function createBattleRankBadge(rank, total, rating, stats = null) {
   const badge = document.createElement("div");
+  badge.className = "hon-battle-rank-badge"; // Using the original class name
   badge.id = "hon-battle-rank-badge";
-  badge.className = "hon-badge"; // Style this in your CSS
-  badge.innerHTML = `🔥 Rank #${rank} of ${total} (${rating}/100)`;
+  
+  // 1. Determine rank tier for styling
+  const percentile = ((total - rank + 1) / total) * 100;
+  let tierEmoji = "";
+  
+  if (percentile >= 95) {
+    tierEmoji = "👑"; // Legendary
+  } else if (percentile >= 80) {
+    tierEmoji = "🥇"; // Gold
+  } else if (percentile >= 60) {
+    tierEmoji = "🥈"; // Silver
+  } else if (percentile >= 40) {
+    tierEmoji = "🥉"; // Bronze
+  } else {
+    tierEmoji = "🔥"; // Default
+  }
+  
+  // 2. Build match stats HTML
+  let matchStatsHTML = '';
+  let winRate = "0.0";
+  const hasMatchStats = stats && stats.total_matches > 0;
+  
+  if (hasMatchStats) {
+    winRate = ((stats.wins / (stats.total_matches || 1)) * 100).toFixed(1);
+    
+    let streakDisplay = '';
+    if (stats.current_streak > 0) {
+      streakDisplay = `<span class="hon-streak-positive">W${stats.current_streak}</span>`;
+    } else if (stats.current_streak < 0) {
+      streakDisplay = `<span class="hon-streak-negative">L${Math.abs(stats.current_streak)}</span>`;
+    }
+    
+    matchStatsHTML = `
+      <span class="hon-match-stats">
+        <span class="hon-stats-record">
+          <span class="hon-wins">${stats.wins}W</span>
+          <span class="hon-losses">${stats.losses}L</span>
+          <span class="hon-draws">${stats.draws}D</span>
+        </span>
+        <span class="hon-win-rate">${winRate}%</span>
+        ${streakDisplay}
+      </span>
+    `;
+  }
+  
+  // 3. Assemble the Badge Inner HTML
+  badge.innerHTML = `
+    <span class="hon-rank-emoji">${tierEmoji}</span>
+    <span class="hon-rank-text">Battle Rank #${rank}</span>
+    <span class="hon-rank-total">of ${total}</span>
+    ${matchStatsHTML}
+  `;
+  
+  // 4. Build the Detailed Tooltip
+  let tooltipText = `Battle Rank #${rank} of ${total} performers (Rating: ${rating}/100)`;
+  if (hasMatchStats) {
+    tooltipText += `\n\nMatch Stats:`;
+    tooltipText += `\n• Record: ${stats.wins}W - ${stats.losses}L - ${stats.draws}D`;
+    tooltipText += `\n• Win Rate: ${winRate}%`;
+    tooltipText += `\n• Total Matches: ${stats.total_matches}`;
+    if (stats.current_streak !== 0) {
+      const streakType = stats.current_streak > 0 ? 'Winning' : 'Losing';
+      tooltipText += `\n• Current Streak: ${streakType} ${Math.abs(stats.current_streak)}`;
+    }
+    if (stats.best_streak > 0) tooltipText += `\n• Best Streak: ${stats.best_streak}`;
+    if (stats.worst_streak < 0) tooltipText += `\n• Worst Streak: ${Math.abs(stats.worst_streak)}`;
+  }
+  badge.title = tooltipText;
+  
   return badge;
 }
+
 
 /**
  * Main Injection Logic
@@ -545,24 +613,25 @@ export async function injectBattleRankBadge() {
 
   window._honBadgeInjectionInProgress = true;
   try {
-    const performerId = getPerformerIdFromUrl();
-    if (!performerId || document.getElementById("hon-battle-rank-badge")) return;
-
-    const rankInfo = await getPerformerBattleRank(performerId);
-    if (!rankInfo) return;
-
-    const badge = createBattleRankBadge(rankInfo.rank, rankInfo.total, rankInfo.rating);
+    setTimeout(async () => {
+      const target = document.querySelector(".performer-info .rating-stars") || 
+        document.querySelector(".performer-head .ms-2") || 
+        document.querySelector(".performer-info") ||
+        document.querySelector(".detail-header .rating-stars");
     
-    // Find injection point (Stash detail page header)
-    const target = document.querySelector(".rating-stars") || 
-                   document.querySelector(".performer-head") || 
-                   document.querySelector(".detail-header");
-    
-    if (target) target.appendChild(badge);
-  } finally {
+      if (target && !document.getElementById("hon-battle-rank-badge")) {
+        const rankInfo = await getPerformerBattleRank(performerId);
+        if (rankInfo) {
+            const badge = createBattleRankBadge(rankInfo.rank, rankInfo.total, rankInfo.rating, rankInfo.stats);
+            target.appendChild(badge);
+        }
+      }
+    }, 300); // 300ms is usually enough for the React UI to catch up
+ } finally {
     window._honBadgeInjectionInProgress = false;
   }
 }
+
 
 
 export function showRatingAnimation(card, oldRating, newRating, change, isWinner) {
@@ -611,15 +680,32 @@ function getPerformerIdFromUrl() {
  * openStatsModal functions
  */
 export function createStatsModalContent(performers) {
-  // Logic to split performers into rank groups (e.g., 1-50, 51-100)
-  const rankGroups = generateStatTables(performers);
+  if (!performers || performers.length === 0) {
+    return '<div class="hon-stats-empty">No performer stats available</div>';
+  }
+
+  // 1. Map raw Stash data to UI-friendly objects
+  const processedPerformers = performers.map((p, idx) => {
+    const stats = parsePerformerEloData(p);
+    const rawRating = p.rating100 ?? 50; // Use 50 if unrated
+    
+    return {
+      ...stats,
+      rank: idx + 1,
+      id: p.id,
+      name: p.name || `Performer #${p.id}`,
+      rating: (rawRating / 10).toFixed(1) // Format 50 to "5.0"
+    };
+  });
+
+  // 2. Generate the HTML for the leaderboard and bar graph
+  const rankGroupsHTML = generateStatTables(processedPerformers);
   
-  // Logic to count how many performers fall into each rating bucket (0.0 - 10.0)
+  // Calculate distribution
   const ratingBuckets = new Array(101).fill(0);
   performers.forEach(p => {
-    if (p.rating100 >= 0 && p.rating100 <= 100) {
-      ratingBuckets[p.rating100]++;
-    }
+    const r = p.rating100 ?? 50;
+    if (r >= 0 && r <= 100) ratingBuckets[r]++;
   });
 
   return `
@@ -632,7 +718,7 @@ export function createStatsModalContent(performers) {
     </div>
     <div class="hon-stats-content">
       <div class="hon-stats-tab-panel active" data-panel="leaderboard">
-        ${rankGroups.join('')}
+        ${rankGroupsHTML} 
       </div>
       <div class="hon-stats-tab-panel" data-panel="distribution">
         <div class="hon-bar-graph">
@@ -642,6 +728,7 @@ export function createStatsModalContent(performers) {
     </div>
   `;
 }
+
 
 export async function openStatsModal() {
     const existingStatsModal = document.getElementById("hon-stats-modal");
