@@ -1,0 +1,14 @@
+name: HotOrNot_V3
+description: Adds an ELO based ranking system for performers and images
+version: 3.0.0
+url: https://github.com/Lurking987/stash-plugins/pull/5
+ui: 
+  javascript:
+    - hot_or_not.js
+  css:
+    - hot_or_not.css
+settings:
+  showBattleRankBadge:
+    displayName: Show Battle Rank Badge
+    description: Show a rank badge on individual performer pages. Enabled by default.
+    type: BOOLEAN
