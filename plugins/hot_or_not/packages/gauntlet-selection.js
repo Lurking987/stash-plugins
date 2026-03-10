@@ -93,7 +93,7 @@ export function showPerformerSelection() {
 
   // 1. Toggle visibility
   if (selectionContainer) {
-    selectionContainer.style.display = "block";
+    //selectionContainer.style.display = "block";
     // 2. Trigger the data fetch (This keeps the rest of your code alive in the bundle)
     loadPerformerSelection(); 
   }

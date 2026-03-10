@@ -105,7 +105,7 @@ export async function fetchRandomImages(count = 2) {
 }
 
 // ... include your fetchRandomPerformers, fetchImageCount, and fetchRandomImages here
-export async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null) {
+export async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null, isDraw = false) {
     const winnerRating = winnerCurrentRating || 50;
     const loserRating = loserCurrentRating || 50;
     const ratingDiff = loserRating - winnerRating;
@@ -113,93 +113,102 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     let freshWinnerObj = winnerObj;
     let freshLoserObj = loserObj;
     
+    // 1. Fetch Fresh Data (if performers)
     if (state.battleType === "performers") {
       const [fetchedWinner, fetchedLoser] = await Promise.all([
-        (winnerObj && winnerId) ? fetchPerformerById(winnerId) : Promise.resolve(null),
-        (loserObj && loserId) ? fetchPerformerById(loserId) : Promise.resolve(null)
+        (winnerId) ? fetchPerformerById(winnerId) : Promise.resolve(null),
+        (loserId) ? fetchPerformerById(loserId) : Promise.resolve(null)
       ]);
       freshWinnerObj = fetchedWinner || winnerObj;
       freshLoserObj = fetchedLoser || loserObj;
     }
     
-    let winnerMatchCount = null;
-    let loserMatchCount = null;
-    if (state.battleType === "performers" && freshWinnerObj) {
-      const winnerStats = parsePerformerEloData(freshWinnerObj);
-      winnerMatchCount = winnerStats.total_matches;
-    }
-    if (state.battleType === "performers" && freshLoserObj) {
-      const loserStats = parsePerformerEloData(freshLoserObj);
-      loserMatchCount = loserStats.total_matches;
+    // 2. Get Match Counts for K-Factor
+    let winnerMatchCount = 0;
+    let loserMatchCount = 0;
+    if (state.battleType === "performers") {
+      winnerMatchCount = parsePerformerEloData(freshWinnerObj)?.total_matches || 0;
+      loserMatchCount = parsePerformerEloData(freshLoserObj)?.total_matches || 0;
     }
     
-    let winnerGain = 0, loserLoss = 0;
-    
-    // FIX: Changed currentMode to state.currentMode
-    if (state.currentMode === "gauntlet") {
-      // FIX: Added state. to gauntletChampion, gauntletFalling, etc.
-      const isChampionWinner = state.gauntletChampion && winnerId === state.gauntletChampion.id;
-      const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
-      const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
-      const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
-      
-      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
-      const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
-      
-      if (isChampionWinner || isFallingWinner) {
-        winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
-      }
-      if (isChampionLoser || isFallingLoser) {
-        loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
-      }
-      
-      if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
-        loserLoss = 1;
-      }
-    // FIX: Changed currentMode to state.currentMode
-    } else if (state.currentMode === "champion") {
-      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
-      const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
-      const loserK = getKFactor(loserRating, loserMatchCount, "champion");
-      
-      winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-      loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
-    } else {
-      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+    let winnerGain = 0;
+    let loserLoss = 0;
+
+    // 3. ELO CALCULATIONS
+    if (isDraw) {
+      // --- DRAW LOGIC (Swiss Only) ---
+      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
+      const expectedLoser = 1 - expectedWinner;
       const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
       const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
-      
-      winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-      loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
+
+      winnerGain = Math.round(winnerK * (0.5 - expectedWinner));
+      loserLoss = Math.round(loserK * (expectedLoser - 0.5)); 
+    } else {
+      // --- WIN/LOSS LOGIC ---
+      if (state.currentMode === "gauntlet") {
+        const isChampionWinner = state.gauntletChampion && winnerId === state.gauntletChampion.id;
+        const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
+        const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
+        const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
+        
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
+        
+        if (isChampionWinner || isFallingWinner) {
+          winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
+        }
+        if (isChampionLoser || isFallingLoser) {
+          loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
+        }
+        if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
+          loserLoss = 1;
+        }
+      } else if (state.currentMode === "champion") {
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
+        const loserK = getKFactor(loserRating, loserMatchCount, "champion");
+        
+        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
+        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
+      } else {
+        // Swiss Mode Default
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
+        const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
+        
+        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
+        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
+      }
     }
     
+    // 4. Finalize Ratings
     const newWinnerRating = Math.min(100, Math.max(1, winnerRating + winnerGain));
     const newLoserRating = Math.min(100, Math.max(1, loserRating - loserLoss));
     
-    const winnerChange = newWinnerRating - winnerRating;
-    const loserChange = newLoserRating - loserRating;
+    // 5. Determine if we should update full stats (History) or just the Rating
+    const winnerRankAtStart = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
+    const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
     
-    // FIX: Added state. to currentPair and currentRanks
-    const winnerRank = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
+    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, winnerRankAtStart) || isFirstMatchGlobal);
+    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchGlobal);
     
-    // FIX: Added state. to currentMode and gauntletChampion
-    const isFirstMatchInGauntletMode = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
-    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, winnerRank) || isFirstMatchInGauntletMode);
-    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchInGauntletMode);
+    // Winner Status: true = win, false = loss, null = draw
+    const winnerStatus = isDraw ? null : true;
+    const loserStatus = isDraw ? null : false;
+
+    // 6. SINGLE SOURCE OF TRUTH: Update Database
+    // Update Winner
+    await updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, winnerStatus);
+    // Update Loser
+    await updateItemRating(loserId, newLoserRating, shouldTrackLoser ? freshLoserObj : null, loserStatus);
     
-    if (winnerChange !== 0 || (state.battleType === "performers" && freshWinnerObj && shouldTrackWinner)) {
-      updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, shouldTrackWinner ? true : null);
-    } else if (state.battleType === "performers" && freshWinnerObj && state.currentMode === "gauntlet") {
-      updateItemRating(winnerId, newWinnerRating, freshWinnerObj, null);
-    }
-    
-    if (loserChange !== 0 || (state.battleType === "performers" && freshLoserObj && shouldTrackLoser)) {
-      updateItemRating(loserId, newLoserRating, shouldTrackLoser ? freshLoserObj : null, shouldTrackLoser ? false : null);
-    } else if (state.battleType === "performers" && freshLoserObj && state.currentMode === "gauntlet") {
-      updateItemRating(loserId, newLoserRating, freshLoserObj, null);
-    }
-    
-    return { newWinnerRating, newLoserRating, winnerChange, loserChange };
+    return { 
+        newWinnerRating, 
+        newLoserRating, 
+        winnerChange: winnerGain, 
+        loserChange: -loserLoss 
+    };
 }
   
 export async function updateItemRating(itemId, newRating, itemObj = null, won = null) {
@@ -386,7 +395,7 @@ export async function getPerformerBattleRank(performerId) {
 
     // 3. Parse the Stats JSON string from the custom field 'hotornot_stats'
     let stats = null;
-    const statsJson = targetPerformer?.custom_fields?.hotornot_stats;
+    const statsJson = targetPerformer?.custom_fields?.["hotornot_stats"];
     
     if (statsJson) {
       try {

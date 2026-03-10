@@ -112,6 +112,38 @@ function updateChampionModeState(winnerId, winnerItem, loserId, newWinnerRating)
 /**
  * Triggers animations and queues the next pair
  */
+ 
+export async function handleSkip() {
+    const leftPerformer = state.currentPair?.left;
+    const rightPerformer = state.currentPair?.right;
+
+    if (!leftPerformer || !rightPerformer) {
+        loadNewPair();
+        return;
+    }
+
+    if (state.currentMode === 'swiss') {
+        console.log(`[HotOrNot] Tying Swiss match: ${leftPerformer.name} vs ${rightPerformer.name}`);
+        try {
+            // We call handleComparison with isDraw = true
+            await handleComparison(
+                leftPerformer.id, 
+                rightPerformer.id, 
+                leftPerformer.rating100, 
+                rightPerformer.rating100, 
+                null, 
+                leftPerformer, 
+                rightPerformer,
+                true // <--- The isDraw flag
+            );
+        } catch (err) {
+            console.error("[HotOrNot] Tie failed:", err);
+        }
+    }
+
+    loadNewPair();
+}
+
 function applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome) {
   winnerCard.classList.add("hon-winner");
   if (loserCard) loserCard.classList.add("hon-loser");
