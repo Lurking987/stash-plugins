@@ -291,6 +291,36 @@ export async function fetchImageCount() {
 }
   
 /**
+ * Fetches all performers who have a rating to generate the stats dashboard
+ */
+export async function fetchAllPerformerStats() {
+    const query = `
+    query AllPerformerStats {
+      allPerformers {
+        id
+        name
+        rating100
+        details
+      }
+    }`;
+
+    try {
+        const result = await graphqlQuery(query);
+        const performers = result.allPerformers || [];
+        
+        // We filter for performers that actually have HotOrNot data (rating100)
+        // and parse their stats from the details field (or wherever your ELO is stored)
+        return performers
+            .filter(p => p.rating100 !== null)
+            .sort((a, b) => b.rating100 - a.rating100);
+    } catch (err) {
+        console.error("[HotOrNot] Failed to fetch all performer stats:", err);
+        throw err;
+    }
+}
+  
+  
+/**
  * ============================================
  * 4. MUTATION LOGIC
  * ============================================

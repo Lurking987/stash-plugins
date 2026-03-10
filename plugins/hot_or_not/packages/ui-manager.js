@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { ALL_GENDERS } from './constants.js';
 import { parsePerformerEloData } from './math-utils.js';
-import { graphqlQuery, getPerformerBattleRank, isBattleRankBadgeEnabled } from './api-client.js';
+import { graphqlQuery, getPerformerBattleRank, isBattleRankBadgeEnabled, fetchAllPerformerStats } from './api-client.js';
 import { formatDuration, getCountryDisplay, getGenderDisplay, escapeHtml } from './formatters.js';
 import { getUrlPerformerFilter } from './parsers.js';
 import { loadNewPair } from './battle-engine.js';
@@ -129,7 +129,11 @@ export function createMainUI() {
     <div class="hon-gender-filter">
       <div class="hon-gender-btns">
         ${(typeof ALL_GENDERS !== 'undefined' ? ALL_GENDERS : []).map(g => `
-          <button class="hon-gender-btn ${state.selectedGenders.includes(g.value) ? 'active' : ''}" data-gender="${g.value}">
+          <button 
+            class="hon-gender-btn ${state.selectedGenders.includes(g.value) ? 'active' : ''}" 
+            data-gender="${g.value}"
+            onclick="window.handleGenderToggle('${g.value}')"
+          >
             ${g.label}
           </button>`).join('')}
       </div>
@@ -141,7 +145,7 @@ export function createMainUI() {
         <h1 class="hon-title">🔥 HotOrNot</h1>
         ${modeToggleHTML}
         ${genderFilterHTML}
-        ${isPerformers ? `<button id="hon-stats-btn" class="btn btn-primary">📊 View All Stats</button>` : ''}
+        ${isPerformers ? `<button onclick="window.openStatsModal()" id="hon-stats-btn" class="btn btn-primary">📊 View All Stats</button>` : ''}
       </div>
       
       <div id="hon-performer-selection" style="display: none;">
@@ -164,6 +168,41 @@ export function createMainUI() {
           <span class="hon-hint"><strong>Space</strong> to Skip</span>
         </div>
     </div>`;
+}
+
+/**
+ * Handles toggling genders in the filter
+ */
+export function handleGenderToggle(gender) {
+  const idx = state.selectedGenders.indexOf(gender);
+  
+  if (idx === -1) {
+    // Add gender if not present
+    state.selectedGenders.push(gender);
+  } else {
+    // Prevent deselecting the last gender
+    if (state.selectedGenders.length <= 1) return;
+    state.selectedGenders.splice(idx, 1);
+  }
+
+  // 1. Reset gauntlet state when filters change
+  state.gauntletChampion = null;
+  state.gauntletWins = 0;
+  state.gauntletDefeated = [];
+  
+  // 2. Re-render the UI to show active/inactive button states
+  const modalContent = document.querySelector(".hon-modal-content");
+  if (modalContent) {
+    // We only need to refresh the inner part of the modal
+    const closeBtn = '<button class="hon-modal-close">✕</button>';
+    modalContent.innerHTML = `${closeBtn}${createMainUI()}`;
+    
+    // 3. Re-attach any non-inline listeners if you have them
+    // (If you use window.handleChooseItem for everything, you're good)
+  }
+
+  // 4. Load a new pair with the new filters
+  loadNewPair();
 }
 
 
@@ -260,19 +299,32 @@ export function openRankingModal() {
 
     // 7. Keyboard Handler (Internal so it can be removed)
     function handleGlobalKeys(e) {
-        if (e.key === "Escape") close();
-        
+      const modal = document.getElementById("hon-modal");
+      if (!modal) {
+      document.removeEventListener("keydown", handleGlobalKeys);
+      return;
+      }
+
+      // List of keys we want to "steal" from Stash
+      const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
+  
+      if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
+        // STOP STASH FROM SEEING THE KEY
+        e.stopImmediatePropagation();
+        e.preventDefault();
+
         if (e.key === "ArrowLeft") {
-            modal.querySelector('.hon-scene-body[data-winner]')?.click();
+          modal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
         }
         if (e.key === "ArrowRight") {
-            // Logic to find right card and click
+          modal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
         }
-        if (e.code === "Space") {
-            e.preventDefault();
-            skipBtn?.click();
+        if (e.key === " " || e.code === "Space") {
+          document.getElementById("hon-skip-btn")?.click();
         }
+      }
     }
+
 
     document.addEventListener("keydown", handleGlobalKeys);
     modal.querySelector(".hon-modal-backdrop").onclick = close;
@@ -411,29 +463,6 @@ export function showPlacementScreen(item, rank, finalRating, battleType, totalIt
   if (actionsEl) actionsEl.style.display = "none";
 }
 
-/**
- * Internal Helper: Generates the granular bars for the stats dashboard
- */
-export function generateBarGroups(ratingBuckets) {
-  const maxBucket = Math.max(...ratingBuckets, 1);
-  return ratingBuckets.map((count, i) => {
-    const percentage = (count / maxBucket) * 100;
-    const ratingLabel = (i / 10).toFixed(1);
-    return `
-      <div class="hon-bar-container">
-        <div class="hon-bar-label">${ratingLabel}</div>
-        <div class="hon-bar-wrapper">
-          <div class="hon-bar" style="width: ${percentage}%">
-            ${count > 0 ? `<span class="hon-bar-count">${count}</span>` : ''}
-          </div>
-        </div>
-      </div>`;
-  }).join('');
-}
-
-/**
- * Internal Helper: Generates the paginated leaderboard table
- */
 /**
  * Internal Helper: Generates the paginated leaderboard table
  */
@@ -575,4 +604,154 @@ function getPerformerIdFromUrl() {
   const path = window.location.pathname;
   const match = path.match(/\/performers\/(\d+)/);
   return match ? match[1] : null;
+}
+
+
+/**
+ * openStatsModal functions
+ */
+export function createStatsModalContent(performers) {
+  // Logic to split performers into rank groups (e.g., 1-50, 51-100)
+  const rankGroups = generateStatTables(performers);
+  
+  // Logic to count how many performers fall into each rating bucket (0.0 - 10.0)
+  const ratingBuckets = new Array(101).fill(0);
+  performers.forEach(p => {
+    if (p.rating100 >= 0 && p.rating100 <= 100) {
+      ratingBuckets[p.rating100]++;
+    }
+  });
+
+  return `
+    <div class="hon-stats-header">
+      <h2>📊 Performer Statistics</h2>
+      <div class="hon-stats-tabs">
+        <button class="hon-stats-tab active" data-tab="leaderboard">Leaderboard</button>
+        <button class="hon-stats-tab" data-tab="distribution">Rating Distribution</button>
+      </div>
+    </div>
+    <div class="hon-stats-content">
+      <div class="hon-stats-tab-panel active" data-panel="leaderboard">
+        ${rankGroups.join('')}
+      </div>
+      <div class="hon-stats-tab-panel" data-panel="distribution">
+        <div class="hon-bar-graph">
+          ${generateBarGroups(ratingBuckets)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export async function openStatsModal() {
+    const existingStatsModal = document.getElementById("hon-stats-modal");
+    if (existingStatsModal) {
+      existingStatsModal.remove();
+    }
+
+    const statsModal = document.createElement("div");
+    statsModal.id = "hon-stats-modal";
+    statsModal.className = "hon-stats-modal";
+    statsModal.innerHTML = `
+      <div class="hon-modal-backdrop"></div>
+      <div class="hon-stats-modal-dialog">
+        <button class="hon-modal-close">✕</button>
+        <div class="hon-stats-loading">Loading stats...</div>
+      </div>
+    `;
+
+    document.body.appendChild(statsModal);
+
+    const closeStats = () => statsModal.remove();
+    statsModal.querySelector(".hon-modal-backdrop").addEventListener("click", closeStats);
+    statsModal.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+
+    try {
+      // 1. Fetch data from your api-client
+      const performers = await fetchAllPerformerStats();
+      
+      // 2. Generate content (ensure createStatsModalContent is in this file or imported)
+      const content = createStatsModalContent(performers);
+      
+      const dialog = statsModal.querySelector(".hon-stats-modal-dialog");
+      dialog.innerHTML = `
+        <button class="hon-modal-close">✕</button>
+        ${content}
+      `;
+
+      dialog.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+
+      // 3. Tab Switching Logic
+      const tabButtons = dialog.querySelectorAll(".hon-stats-tab");
+      const tabPanels = dialog.querySelectorAll(".hon-stats-tab-panel");
+      
+      tabButtons.forEach(button => {
+        button.addEventListener("click", () => {
+          const tabName = button.dataset.tab;
+          tabButtons.forEach(btn => btn.classList.remove("active"));
+          button.classList.add("active");
+          tabPanels.forEach(panel => {
+            panel.classList.toggle("active", panel.dataset.panel === tabName);
+          });
+        });
+      });
+
+      // 4. Collapsible Group Logic
+      const attachCollapseHandlers = (headerSelector, contentSelector) => {
+        const headers = dialog.querySelectorAll(headerSelector);
+        headers.forEach(header => {
+          header.addEventListener("click", () => {
+            const groupIndex = header.dataset.group;
+            const content = dialog.querySelector(`${contentSelector}[data-group="${groupIndex}"]`);
+            const toggle = header.querySelector(".hon-group-toggle");
+            
+            if (content && content.classList.toggle("collapsed")) {
+              header.setAttribute("aria-expanded", "false");
+              toggle.textContent = "▶";
+            } else if (content) {
+              header.setAttribute("aria-expanded", "true");
+              toggle.textContent = "▼";
+            }
+          });
+        });
+      };
+
+      attachCollapseHandlers(".hon-rank-group-header", ".hon-rank-group-content");
+      attachCollapseHandlers(".hon-bar-group-header", ".hon-bar-group-content");
+      
+    } catch (error) {
+      console.error("[HotOrNot] Error loading stats:", error);
+      const dialog = statsModal.querySelector(".hon-stats-modal-dialog");
+      dialog.innerHTML = `
+        <button class="hon-modal-close">✕</button>
+        <div class="hon-stats-error">Failed to load statistics.</div>
+      `;
+      dialog.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+    }
+}
+
+/**
+ * Internal Helper: Generates the granular bars for the stats distribution graph
+ */
+export function generateBarGroups(ratingBuckets) {
+  // Find the highest count to scale the bars proportionally
+  const maxBucket = Math.max(...ratingBuckets, 1);
+  
+  // Group the 100 buckets into 10 main groups (0-10, 11-20, etc.) 
+  // or show all 100 if you want high detail.
+  return ratingBuckets.map((count, i) => {
+    if (count === 0) return ''; // Skip empty bars to keep the UI clean
+    
+    const percentage = (count / maxBucket) * 100;
+    // ratingBuckets index i corresponds to the rating (0-100)
+    return `
+      <div class="hon-bar-container" title="Rating ${i}: ${count} performers">
+        <div class="hon-bar-label">${i}</div>
+        <div class="hon-bar-wrapper">
+          <div class="hon-bar" style="width: ${percentage}%">
+            ${count > 5 ? `<span class="hon-bar-count">${count}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 }
