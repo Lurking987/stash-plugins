@@ -785,6 +785,25 @@
     const countResult = await graphqlQuery(countQuery);
     return countResult.findImages.count;
   }
+  async function fetchAllPerformerStats() {
+    const query = `
+    query AllPerformerStats {
+      allPerformers {
+        id
+        name
+        rating100
+        details
+      }
+    }`;
+    try {
+      const result = await graphqlQuery(query);
+      const performers = result.allPerformers || [];
+      return performers.filter((p) => p.rating100 !== null).sort((a, b) => b.rating100 - a.rating100);
+    } catch (err) {
+      console.error("[HotOrNot] Failed to fetch all performer stats:", err);
+      throw err;
+    }
+  }
   async function updateSceneRating(id, rating) {
     await graphqlQuery(`mutation($i: SceneUpdateInput!) { sceneUpdate(input: $i) { id } }`, {
       i: { id, rating100: Math.max(1, Math.min(100, rating)) }
@@ -1361,21 +1380,28 @@
     `;
   }
   function createMainUI() {
-    const { battleType: battleType2, currentMode: currentMode2, selectedGenders: selectedGenders2 } = state;
-    const isPerformers = battleType2 === "performers";
-    const itemType = isPerformers ? "performers" : battleType2 === "images" ? "images" : "scenes";
-    const modeToggleHTML = battleType2 !== "images" ? `
+    const isPerformers = state.battleType === "performers";
+    const MODE_LABELS = {
+      swiss: "\u2696\uFE0F Swiss",
+      gauntlet: "\u{1F94A} Gauntlet",
+      champion: "\u{1F451} Champion"
+    };
+    const modeToggleHTML = state.battleType !== "images" ? `
     <div class="hon-mode-toggle">
       ${["swiss", "gauntlet", "champion"].map((mode) => `
-        <button class="hon-mode-btn ${currentMode2 === mode ? "active" : ""}" data-mode="${mode}">
-          ${mode.toUpperCase()}
+        <button class="hon-mode-btn ${state.currentMode === mode ? "active" : ""}" data-mode="${mode}">
+          ${MODE_LABELS[mode]}
         </button>`).join("")}
     </div>` : "";
     const genderFilterHTML = isPerformers ? `
     <div class="hon-gender-filter">
       <div class="hon-gender-btns">
-        ${ALL_GENDERS.map((g) => `
-          <button class="hon-gender-btn ${selectedGenders2.includes(g.value) ? "active" : ""}" data-gender="${g.value}">
+        ${(typeof ALL_GENDERS !== "undefined" ? ALL_GENDERS : []).map((g) => `
+          <button 
+            class="hon-gender-btn ${state.selectedGenders.includes(g.value) ? "active" : ""}" 
+            data-gender="${g.value}"
+            onclick="window.handleGenderToggle('${g.value}')"
+          >
             ${g.label}
           </button>`).join("")}
       </div>
@@ -1384,15 +1410,50 @@
     <div id="hotornot-container" class="hon-container">
       <div class="hon-header">
         <h1 class="hon-title">\u{1F525} HotOrNot</h1>
-        ${modeToggleHTML}${genderFilterHTML}
-        ${isPerformers ? `<button id="hon-stats-btn" class="btn btn-primary">\u{1F4CA} View All Stats</button>` : ""}
+        ${modeToggleHTML}
+        ${genderFilterHTML}
+        ${isPerformers ? `<button onclick="window.openStatsModal()" id="hon-stats-btn" class="btn btn-primary">\u{1F4CA} View All Stats</button>` : ""}
       </div>
-      <div id="hon-performer-selection" style="display: none;"><div id="hon-performer-list">Loading...</div></div>
+      
+      <div id="hon-performer-selection" style="display: none;">
+        <div id="hon-performer-list">Loading...</div>
+      </div>
+      
       <div class="hon-content">
-        <div id="hon-comparison-area"><div class="hon-loading">Loading...</div></div>
-        <div class="hon-actions"><button id="hon-skip-btn" class="btn btn-secondary">Skip (Space)</button></div>
-      </div>
+        <div id="hon-comparison-area">
+            <div class="hon-loading">Loading...</div>
+        </div>
+        
+        <div class="hon-actions">
+          <button id="hon-skip-btn" class="btn btn-secondary">Skip (Space)</button>
+        </div>
+        
+        <!-- This is the missing keyboard hint bar -->
+        <div class="hon-keyboard-hints">
+          <span class="hon-hint"><strong>\u2B05\uFE0F</strong> Choose Left</span>
+          <span class="hon-hint"><strong>\u27A1\uFE0F</strong> Choose Right</span>
+          <span class="hon-hint"><strong>Space</strong> to Skip</span>
+        </div>
     </div>`;
+  }
+  function handleGenderToggle(gender) {
+    const idx = state.selectedGenders.indexOf(gender);
+    if (idx === -1) {
+      state.selectedGenders.push(gender);
+    } else {
+      if (state.selectedGenders.length <= 1)
+        return;
+      state.selectedGenders.splice(idx, 1);
+    }
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
+    const modalContent = document.querySelector(".hon-modal-content");
+    if (modalContent) {
+      const closeBtn = '<button class="hon-modal-close">\u2715</button>';
+      modalContent.innerHTML = `${closeBtn}${createMainUI()}`;
+    }
+    loadNewPair();
   }
   function shouldShowButton() {
     return ["/performers", "/performers/", "/images", "/images/"].includes(window.location.pathname);
@@ -1409,24 +1470,84 @@
     document.body.appendChild(btn);
   }
   function openRankingModal() {
-    if (window.location.pathname.includes("/images")) {
+    const path = window.location.pathname;
+    if (path.includes("/images")) {
       state.battleType = "images";
       state.currentMode = "swiss";
+      state.cachedUrlFilter = null;
     } else {
       state.battleType = "performers";
       state.cachedUrlFilter = getUrlPerformerFilter();
     }
-    document.getElementById("hon-modal")?.remove();
+    const existingModal = document.getElementById("hon-modal");
+    if (existingModal)
+      existingModal.remove();
     const modal = document.createElement("div");
     modal.id = "hon-modal";
     modal.innerHTML = `
-    <div class="hon-modal-backdrop"></div>
-    <div class="hon-modal-content">
-      <button class="hon-modal-close">\u2715</button>
-      ${createMainUI()}
-    </div>`;
+      <div class="hon-modal-backdrop"></div>
+      <div class="hon-modal-content">
+        <button class="hon-modal-close">\u2715</button>
+        ${createMainUI()}
+      </div>
+    `;
     document.body.appendChild(modal);
-    const close = () => modal.remove();
+    modal.querySelectorAll(".hon-mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (state.battleType === "images")
+          return;
+        const newMode = btn.dataset.mode;
+        if (newMode !== state.currentMode) {
+          state.currentMode = newMode;
+          state.gauntletChampion = null;
+          state.gauntletWins = 0;
+          state.gauntletDefeated = [];
+          modal.querySelectorAll(".hon-mode-btn").forEach(
+            (b) => b.classList.toggle("active", b.dataset.mode === state.currentMode)
+          );
+          loadNewPair();
+        }
+      });
+    });
+    const skipBtn = modal.querySelector("#hon-skip-btn");
+    if (skipBtn) {
+      skipBtn.addEventListener("click", () => {
+        if (state.disableChoice)
+          return;
+        if (state.battleType === "performers" && (state.currentMode === "gauntlet" || state.currentMode === "champion")) {
+          state.gauntletChampion = null;
+          state.gauntletWins = 0;
+        }
+        state.disableChoice = true;
+        loadNewPair();
+      });
+    }
+    const close = () => {
+      modal.remove();
+      document.removeEventListener("keydown", handleGlobalKeys);
+    };
+    function handleGlobalKeys(e) {
+      const modal2 = document.getElementById("hon-modal");
+      if (!modal2) {
+        document.removeEventListener("keydown", handleGlobalKeys);
+        return;
+      }
+      const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
+      if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (e.key === "ArrowLeft") {
+          modal2.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+        }
+        if (e.key === "ArrowRight") {
+          modal2.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+        }
+        if (e.key === " " || e.code === "Space") {
+          document.getElementById("hon-skip-btn")?.click();
+        }
+      }
+    }
+    document.addEventListener("keydown", handleGlobalKeys);
     modal.querySelector(".hon-modal-backdrop").onclick = close;
     modal.querySelector(".hon-modal-close").onclick = close;
     loadNewPair();
@@ -1511,6 +1632,50 @@
     if (actionsEl)
       actionsEl.style.display = "none";
   }
+  function generateStatTables(processedPerformers) {
+    const groups = [];
+    const groupSize = 250;
+    for (let i = 0; i < processedPerformers.length; i += groupSize) {
+      const chunk = processedPerformers.slice(i, i + groupSize);
+      const startRank = i + 1;
+      const endRank = Math.min(i + groupSize, processedPerformers.length);
+      const rows = chunk.map((p) => {
+        const winRate = p.total_matches > 0 ? (p.wins / p.total_matches * 100).toFixed(1) : "N/A";
+        const streakDisplay = p.current_streak > 0 ? `<span class="hon-stats-positive">+${p.current_streak}</span>` : p.current_streak < 0 ? `<span class="hon-stats-negative">${p.current_streak}</span>` : "0";
+        return `
+        <tr>
+          <td class="hon-stats-rank">#${p.rank}</td>
+          <td class="hon-stats-name"><a href="/performers/${p.id}" target="_blank">${escapeHtml(p.name)}</a></td>
+          <td class="hon-stats-rating">${p.rating}</td>
+          <td>${p.total_matches}</td>
+          <td class="hon-stats-positive">${p.wins}</td>
+          <td class="hon-stats-negative">${p.losses}</td>
+          <td>${winRate}%</td>
+          <td>${streakDisplay}</td>
+          <td class="hon-stats-positive">${p.best_streak}</td>
+          <td class="hon-stats-negative">${p.worst_streak}</td>
+        </tr>`;
+      }).join("");
+      groups.push(`
+      <div class="hon-rank-group">
+        <div class="hon-rank-group-header" data-group="${i}" role="button">
+          <span class="hon-group-toggle">\u25B6</span>
+          <span class="hon-rank-group-title">Ranks ${startRank}-${endRank}</span>
+        </div>
+        <div class="hon-rank-group-content collapsed" data-group="${i}">
+          <table class="hon-stats-table">
+            <thead>
+              <tr>
+                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th><th>W</th><th>L</th><th>%</th><th>Streak</th><th>Best</th><th>Worst</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`);
+    }
+    return groups.join("");
+  }
   function isOnSinglePerformerPage() {
     return getPerformerIdFromUrl() !== null;
   }
@@ -1576,16 +1741,139 @@
     const match = path.match(/\/performers\/(\d+)/);
     return match ? match[1] : null;
   }
+  function createStatsModalContent(performers) {
+    const rankGroups = generateStatTables(performers);
+    const ratingBuckets = new Array(101).fill(0);
+    performers.forEach((p) => {
+      if (p.rating100 >= 0 && p.rating100 <= 100) {
+        ratingBuckets[p.rating100]++;
+      }
+    });
+    return `
+    <div class="hon-stats-header">
+      <h2>\u{1F4CA} Performer Statistics</h2>
+      <div class="hon-stats-tabs">
+        <button class="hon-stats-tab active" data-tab="leaderboard">Leaderboard</button>
+        <button class="hon-stats-tab" data-tab="distribution">Rating Distribution</button>
+      </div>
+    </div>
+    <div class="hon-stats-content">
+      <div class="hon-stats-tab-panel active" data-panel="leaderboard">
+        ${rankGroups.join("")}
+      </div>
+      <div class="hon-stats-tab-panel" data-panel="distribution">
+        <div class="hon-bar-graph">
+          ${generateBarGroups(ratingBuckets)}
+        </div>
+      </div>
+    </div>
+  `;
+  }
+  async function openStatsModal() {
+    const existingStatsModal = document.getElementById("hon-stats-modal");
+    if (existingStatsModal) {
+      existingStatsModal.remove();
+    }
+    const statsModal = document.createElement("div");
+    statsModal.id = "hon-stats-modal";
+    statsModal.className = "hon-stats-modal";
+    statsModal.innerHTML = `
+      <div class="hon-modal-backdrop"></div>
+      <div class="hon-stats-modal-dialog">
+        <button class="hon-modal-close">\u2715</button>
+        <div class="hon-stats-loading">Loading stats...</div>
+      </div>
+    `;
+    document.body.appendChild(statsModal);
+    const closeStats = () => statsModal.remove();
+    statsModal.querySelector(".hon-modal-backdrop").addEventListener("click", closeStats);
+    statsModal.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+    try {
+      const performers = await fetchAllPerformerStats();
+      const content = createStatsModalContent(performers);
+      const dialog = statsModal.querySelector(".hon-stats-modal-dialog");
+      dialog.innerHTML = `
+        <button class="hon-modal-close">\u2715</button>
+        ${content}
+      `;
+      dialog.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+      const tabButtons = dialog.querySelectorAll(".hon-stats-tab");
+      const tabPanels = dialog.querySelectorAll(".hon-stats-tab-panel");
+      tabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const tabName = button.dataset.tab;
+          tabButtons.forEach((btn) => btn.classList.remove("active"));
+          button.classList.add("active");
+          tabPanels.forEach((panel) => {
+            panel.classList.toggle("active", panel.dataset.panel === tabName);
+          });
+        });
+      });
+      const attachCollapseHandlers = (headerSelector, contentSelector) => {
+        const headers = dialog.querySelectorAll(headerSelector);
+        headers.forEach((header) => {
+          header.addEventListener("click", () => {
+            const groupIndex = header.dataset.group;
+            const content2 = dialog.querySelector(`${contentSelector}[data-group="${groupIndex}"]`);
+            const toggle = header.querySelector(".hon-group-toggle");
+            if (content2 && content2.classList.toggle("collapsed")) {
+              header.setAttribute("aria-expanded", "false");
+              toggle.textContent = "\u25B6";
+            } else if (content2) {
+              header.setAttribute("aria-expanded", "true");
+              toggle.textContent = "\u25BC";
+            }
+          });
+        });
+      };
+      attachCollapseHandlers(".hon-rank-group-header", ".hon-rank-group-content");
+      attachCollapseHandlers(".hon-bar-group-header", ".hon-bar-group-content");
+    } catch (error) {
+      console.error("[HotOrNot] Error loading stats:", error);
+      const dialog = statsModal.querySelector(".hon-stats-modal-dialog");
+      dialog.innerHTML = `
+        <button class="hon-modal-close">\u2715</button>
+        <div class="hon-stats-error">Failed to load statistics.</div>
+      `;
+      dialog.querySelector(".hon-modal-close").addEventListener("click", closeStats);
+    }
+  }
+  function generateBarGroups(ratingBuckets) {
+    const maxBucket = Math.max(...ratingBuckets, 1);
+    return ratingBuckets.map((count, i) => {
+      if (count === 0)
+        return "";
+      const percentage = count / maxBucket * 100;
+      return `
+      <div class="hon-bar-container" title="Rating ${i}: ${count} performers">
+        <div class="hon-bar-label">${i}</div>
+        <div class="hon-bar-wrapper">
+          <div class="hon-bar" style="width: ${percentage}%">
+            ${count > 5 ? `<span class="hon-bar-count">${count}</span>` : ""}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  }
 
   // main.js
   function main() {
+    if (window.honLoaded)
+      return;
+    window.honLoaded = true;
     console.log("[HotOrNot] Initialized");
+    window.handleChooseItem = handleChooseItem;
+    window.openRankingModal = openRankingModal;
+    window.openStatsModal = openStatsModal;
+    window.handleGenderToggle = handleGenderToggle;
     addFloatingButton();
     if (isOnSinglePerformerPage()) {
       setTimeout(() => injectBattleRankBadge(), 500);
     }
     const observer = new MutationObserver(() => {
-      addFloatingButton();
+      if (!document.getElementById("hon-floating-btn")) {
+        addFloatingButton();
+      }
       if (isOnSinglePerformerPage() && !document.getElementById("hon-battle-rank-badge")) {
         injectBattleRankBadge();
       }
@@ -1593,8 +1881,8 @@
     observer.observe(document.body, { childList: true, subtree: true });
     if (typeof PluginApi !== "undefined" && PluginApi.Event?.addEventListener) {
       PluginApi.Event.addEventListener("stash:location", (e) => {
-        const path = e.detail.data.location.pathname;
-        if (["/performers", "/performers/"].includes(path)) {
+        const path = e.detail?.data?.location?.pathname || "";
+        if (path.includes("/performers")) {
           state.cachedUrlFilter = getUrlPerformerFilter();
         }
         if (isOnSinglePerformerPage()) {
