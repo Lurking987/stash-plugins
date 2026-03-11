@@ -348,8 +348,10 @@
       total_matches: currentStats.total_matches + 1,
       last_match: (/* @__PURE__ */ new Date()).toISOString()
     };
-    if (won === null)
+    if (won === null) {
+      newStats.draws = (currentStats.draws || 0) + 1;
       return newStats;
+    }
     newStats.wins = won ? currentStats.wins + 1 : currentStats.wins;
     newStats.losses = won ? currentStats.losses : currentStats.losses + 1;
     newStats.current_streak = won ? currentStats.current_streak >= 0 ? currentStats.current_streak + 1 : 1 : currentStats.current_streak <= 0 ? currentStats.current_streak - 1 : -1;
@@ -367,11 +369,11 @@
     }
     return mode === "champion" ? Math.max(1, Math.round(baseK * 0.5)) : baseK;
   }
-  function isActiveParticipant(performerId, mode, gauntletChampion2, gauntletFallingItem2) {
+  function isActiveParticipant(performerId, mode, gauntletChampion, gauntletFallingItem) {
     if (mode === "swiss" || mode === "champion")
       return true;
     if (mode === "gauntlet") {
-      return performerId === gauntletChampion2?.id || performerId === gauntletFallingItem2?.id;
+      return performerId === gauntletChampion?.id || performerId === gauntletFallingItem?.id;
     }
     return false;
   }
@@ -725,8 +727,8 @@
     const newLoserRating = Math.min(100, Math.max(1, loserRating - loserLoss));
     const winnerRankAtStart = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
     const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
-    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, winnerRankAtStart) || isFirstMatchGlobal);
-    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchGlobal);
+    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
+    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
     const winnerStatus = isDraw ? null : true;
     const loserStatus = isDraw ? null : false;
     await updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, winnerStatus);
@@ -792,27 +794,15 @@
     return countResult.findImages.count;
   }
   async function fetchAllPerformerStats() {
-    const query = `
-    query AllPerformerStats {
-      allPerformers {
-        id
-        name
-        rating100
-        details
+    const result = await graphqlQuery(`
+    query FindAllPerformers($filter: FindFilterType) {
+      findPerformers(filter: $filter) {
+        performers { ${PERFORMER_FRAGMENT} }
       }
-    }`;
-    try {
-      const result = await graphqlQuery(query);
-      const performers = result.allPerformers || [];
-      return performers.sort((a, b) => {
-        const rA = a.rating100 ?? 50;
-        const rB = b.rating100 ?? 50;
-        return rB - rA;
-      });
-    } catch (err) {
-      console.error("[HotOrNot] Failed to fetch all performer stats:", err);
-      throw err;
     }
+  `, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+    const performers = result.findPerformers.performers || [];
+    return performers.sort((a, b) => (b.rating100 ?? 50) - (a.rating100 ?? 50));
   }
   async function updateSceneRating(id, rating) {
     await graphqlQuery(`mutation($i: SceneUpdateInput!) { sceneUpdate(input: $i) { id } }`, {
@@ -838,19 +828,21 @@
   async function getPerformerBattleRank(performerId) {
     try {
       const result = await graphqlQuery(`
-      query AllPerformersAndTargetStats($id: ID!) {
-        allPerformers {
-          id
-          rating100
+      query GetPerformerRank($id: ID!, $filter: FindFilterType) {
+        findPerformers(filter: $filter) {
+          performers {
+            id
+            rating100
+          }
         }
         findPerformer(id: $id) {
           custom_fields
         }
       }
-    `, { id: performerId });
-      const allPerformers = result.allPerformers || [];
+    `, { id: performerId, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+      const allPerformers = result?.findPerformers?.performers || [];
       const targetPerformer = result.findPerformer;
-      const ratedPerformers = allPerformers.filter((p) => p.rating100 !== null).sort((a, b) => (b.rating100 || 0) - (a.rating100 || 0));
+      const ratedPerformers = allPerformers.filter((p) => p.rating100 !== null);
       const total = ratedPerformers.length;
       const index = ratedPerformers.findIndex((p) => p.id === performerId);
       if (index === -1)
@@ -861,16 +853,10 @@
         try {
           stats = typeof statsJson === "string" ? JSON.parse(statsJson) : statsJson;
         } catch (e) {
-          console.warn("[HotOrNot] Could not parse hotornot_stats for performer:", performerId);
+          console.warn("[HotOrNot] Could not parse hotornot_stats:", performerId);
         }
       }
-      return {
-        rank: index + 1,
-        total,
-        rating: ratedPerformers[index].rating100,
-        stats
-        // This is now the object { wins: X, losses: Y, ... }
-      };
+      return { rank: index + 1, total, rating: ratedPerformers[index].rating100, stats };
     } catch (err) {
       console.error("[HotOrNot] Error calculating rank:", err);
       return null;
@@ -906,7 +892,7 @@
   }
 
   // gauntlet-selection.js
-  async function fetchPerformersForSelection(count = 2) {
+  async function fetchPerformersForSelection(count = 5) {
     const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
     const total = await fetchPerformerCount(filter);
     const actualCount = Math.min(count, total);
@@ -940,7 +926,7 @@
     if (!listEl)
       return;
     try {
-      const performers = await fetchPerformersForSelection(2);
+      const performers = await fetchPerformersForSelection(5);
       listEl.innerHTML = performers.map((p) => createSelectionCard(p)).join("");
       listEl.querySelectorAll(".hon-selection-card").forEach((card) => {
         card.onclick = () => {
@@ -968,6 +954,7 @@
     const comparisonArea = document.getElementById("hon-comparison-area");
     const actionsEl = document.querySelector(".hon-actions");
     if (selectionContainer) {
+      selectionContainer.style.display = "block";
       loadPerformerSelection();
     }
     if (comparisonArea)
@@ -985,10 +972,10 @@
     if (!comparisonArea)
       return;
     let title, imagePath;
-    if (battleType === "performers") {
+    if (state.battleType === "performers") {
       title = item.name || `Performer #${item.id}`;
       imagePath = item.image_path;
-    } else if (battleType === "images") {
+    } else if (state.battleType === "images") {
       title = `Image #${item.id}`;
       imagePath = item.paths && item.paths.thumbnail ? item.paths.thumbnail : null;
     } else {
@@ -1012,7 +999,7 @@
         </div>
         <h3 class="hon-victory-name">${title}</h3>
         <p class="hon-victory-stats">
-          Rank <strong>#${rank}</strong> of ${totalItemsCount}<br>
+          Rank <strong>#${rank}</strong> of ${state.totalItemsCount}<br>
           Rating: <strong>${finalRating}/100</strong>
         </p>
         <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
@@ -1024,11 +1011,11 @@
       statusEl.style.display = "none";
     if (actionsEl)
       actionsEl.style.display = "none";
-    gauntletFalling = false;
-    gauntletFallingItem = null;
-    gauntletChampion = null;
-    gauntletWins = 0;
-    gauntletDefeated = [];
+    state.gauntletFalling = false;
+    state.gauntletFallingItem = null;
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
     const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");
     if (newBtn) {
       newBtn.addEventListener("click", () => {
@@ -1040,7 +1027,7 @@
   }
 
   // match-handler.js
-  async function handleChooseItem2(event) {
+  async function handleChooseItem(event) {
     if (state.disableChoice)
       return;
     state.disableChoice = true;
@@ -1076,7 +1063,7 @@
         return;
       }
       const outcome2 = await handleComparison(winnerId, loserId, winnerRating, loserRating, loserRank, winnerItem, loserItem);
-      updateGauntletState(winnerId, winnerItem, loserId, outcome2.newWinnerRating);
+      updateGauntletState(winnerId, winnerItem, loserId, loserItem, outcome2.newWinnerRating);
       applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome2);
       return;
     }
@@ -1089,7 +1076,7 @@
     const outcome = await handleComparison(winnerId, loserId, winnerRating, loserRating, null, winnerItem, loserItem);
     applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome);
   }
-  function updateGauntletState(winnerId, winnerItem, loserId, newWinnerRating) {
+  function updateGauntletState(winnerId, winnerItem, loserId, loserItem, newWinnerRating) {
     if (state.gauntletChampion?.id === winnerId) {
       state.gauntletDefeated.push(loserId);
       state.gauntletWins++;
@@ -1097,7 +1084,7 @@
     } else {
       if (state.gauntletChampion) {
         state.gauntletFalling = true;
-        state.gauntletFallingItem = state.currentPair.left.id === winnerId ? state.currentPair.right : state.currentPair.left;
+        state.gauntletFallingItem = loserItem;
         state.gauntletDefeated = [winnerId];
       }
       state.gauntletChampion = winnerItem;
@@ -1156,25 +1143,25 @@
 
   // battle-engine.js
   async function fetchPair() {
-    const { battleType: battleType2, currentMode, selectedGenders } = state;
+    const { battleType, currentMode, selectedGenders } = state;
     if (currentMode === "swiss") {
-      if (battleType2 === "performers")
+      if (battleType === "performers")
         return await fetchSwissPairPerformers(state.selectedGenders);
-      if (battleType2 === "images")
+      if (battleType === "images")
         return await fetchSwissPairImages();
       return await fetchSwissPairScenes();
     }
     if (currentMode === "gauntlet") {
-      if (battleType2 === "performers")
+      if (battleType === "performers")
         return await fetchGauntletPairPerformers();
-      if (battleType2 === "images")
+      if (battleType === "images")
         return await fetchSwissPairImages();
       return await fetchGauntletPairScenes();
     }
     if (currentMode === "champion") {
-      if (battleType2 === "performers")
+      if (battleType === "performers")
         return await fetchChampionPairPerformers();
-      if (battleType2 === "images")
+      if (battleType === "images")
         return await fetchSwissPairImages();
       return await fetchChampionPairScenes();
     }
@@ -1216,7 +1203,7 @@
   }
   function attachBattleListeners(area) {
     area.querySelectorAll(".hon-scene-body").forEach((body) => {
-      body.onclick = (e) => handleChooseItem2(e);
+      body.onclick = (e) => handleChooseItem(e);
     });
     area.querySelectorAll(".hon-scene-card").forEach((card) => {
       const video = card.querySelector(".hon-hover-preview");
@@ -1296,8 +1283,7 @@
   }
   async function fetchSwissPairPerformers() {
     const genders = state.selectedGenders;
-    const randomGender = state.selectedGenders[Math.floor(Math.random() * state.selectedGenders.length)];
-    const performerFilter = getPerformerFilter(state.cachedUrlFilter, [randomGender]);
+    const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
     const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
   }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
@@ -1393,10 +1379,10 @@
   }
   function createVictoryScreen(champion) {
     let title, imagePath;
-    if (battleType === "performers") {
+    if (state.battleType === "performers") {
       title = champion.name || `Performer #${champion.id}`;
       imagePath = champion.image_path;
-    } else if (battleType === "images") {
+    } else if (state.battleType === "images") {
       title = `Image #${champion.id}`;
       imagePath = champion.paths && champion.paths.thumbnail ? champion.paths.thumbnail : null;
     } else {
@@ -1411,7 +1397,7 @@
       }
       imagePath = champion.paths ? champion.paths.screenshot : null;
     }
-    const itemType = battleType === "performers" ? "performers" : battleType === "images" ? "images" : "scenes";
+    const itemType = state.battleType === "performers" ? "performers" : state.battleType === "images" ? "images" : "scenes";
     return `
       <div class="hon-victory-screen">
         <div class="hon-victory-crown">\u{1F451}</div>
@@ -1420,7 +1406,7 @@
           ${imagePath ? `<img class="hon-victory-image" src="${imagePath}" alt="${title}" />` : `<div class="hon-victory-image hon-no-image">No Image</div>`}
         </div>
         <h3 class="hon-victory-name">${title}</h3>
-        <p class="hon-victory-stats">Conquered all ${totalItemsCount} ${itemType} with a ${gauntletWins} win streak!</p>
+        <p class="hon-victory-stats">Conquered all ${state.totalItemsCount} with ${state.gauntletWins} wins!</p>
         <button id="hon-new-gauntlet" class="btn btn-primary">Start New Gauntlet</button>
       </div>
     `;
@@ -1482,11 +1468,6 @@
     parent.querySelectorAll(".hon-performer-link, .hon-gauntlet-select-img").forEach((link) => {
       link.addEventListener("click", (e) => {
         e.stopPropagation();
-      });
-    });
-    parent.querySelectorAll(".hon-performer-body").forEach((btnArea) => {
-      btnArea.addEventListener("click", (e) => {
-        handleChooseItem(e);
       });
     });
     const skipBtn = parent.querySelector("#hon-skip-btn");
@@ -1671,15 +1652,15 @@
       </div>
     </div>`;
   }
-  function showPlacementScreen2(item, rank, finalRating, battleType2, totalItemsCount2) {
+  function showPlacementScreen2(item, rank, finalRating, battleType, totalItemsCount) {
     const area = document.getElementById("hon-comparison-area");
     if (!area)
       return;
     let title, imagePath;
-    if (battleType2 === "performers") {
+    if (battleType === "performers") {
       title = item.name || `Performer #${item.id}`;
       imagePath = item.image_path;
-    } else if (battleType2 === "images") {
+    } else if (battleType === "images") {
       title = `Image #${item.id}`;
       imagePath = item.paths?.thumbnail || null;
     } else {
@@ -1696,7 +1677,7 @@
       </div>
       <h3 class="hon-victory-name">${title}</h3>
       <p class="hon-victory-stats">
-        Rank <strong>#${rank}</strong> of ${totalItemsCount2}<br>
+        Rank <strong>#${rank}</strong> of ${totalItemsCount}<br>
         Rating: <strong>${finalRating}/100</strong>
       </p>
       <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
@@ -1725,6 +1706,7 @@
           <td>${p.total_matches}</td>
           <td class="hon-stats-positive">${p.wins}</td>
           <td class="hon-stats-negative">${p.losses}</td>
+		  <td>${p.draws || 0}</td>
           <td>${winRate}%</td>
           <td>${streakDisplay}</td>
           <td class="hon-stats-positive">${p.best_streak}</td>
@@ -1741,7 +1723,7 @@
           <table class="hon-stats-table">
             <thead>
               <tr>
-                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th><th>W</th><th>L</th><th>%</th><th>Streak</th><th>Best</th><th>Worst</th>
+                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th><th>W</th><th>L</th><th>D</th><th>%</th><th>Streak</th><th>Best</th><th>Worst</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -1824,33 +1806,33 @@ Match Stats:`;
     return badge;
   }
   async function injectBattleRankBadge() {
-    if (window._honBadgeInjectionInProgress)
-      return;
     const pathParts = window.location.pathname.split("/");
     const pIndex = pathParts.indexOf("performers");
     if (pIndex === -1 || !pathParts[pIndex + 1])
       return;
     const performerId = pathParts[pIndex + 1];
-    window._honBadgeInjectionInProgress = true;
-    try {
-      setTimeout(async () => {
-        const target = document.querySelector(".performer-info") || document.querySelector(".performer-header") || document.querySelector(".row.align-items-center");
-        if (target && !document.getElementById("hon-battle-rank-badge")) {
+    setTimeout(async () => {
+      if (window._honBadgeInjectionInProgress)
+        return;
+      window._honBadgeInjectionInProgress = true;
+      try {
+        const ratingEl = document.querySelector(".quality-group");
+        if (ratingEl && !document.getElementById("hon-battle-rank-badge")) {
           const rankInfo = await getPerformerBattleRank(performerId);
-          const badge = createBattleRankBadge(
-            rankInfo?.rank || "?",
-            rankInfo?.total || "?",
-            rankInfo?.rating || 50,
-            rankInfo?.stats || null
-          );
-          target.prepend(badge);
+          if (rankInfo) {
+            const badge = createBattleRankBadge(
+              rankInfo.rank,
+              rankInfo.total,
+              rankInfo.rating,
+              rankInfo.stats
+            );
+            ratingEl.append(badge);
+          }
         }
+      } finally {
         window._honBadgeInjectionInProgress = false;
-      }, 200);
-    } catch (err) {
-      console.error("[HotOrNot] Badge injection failed:", err);
-      window._honBadgeInjectionInProgress = false;
-    }
+      }
+    }, 200);
   }
   function showRatingAnimation(card, oldRating, newRating, change, isWinner) {
     const overlay = document.createElement("div");
@@ -2027,7 +2009,7 @@ Match Stats:`;
   window.closeRankingModal = closeRankingModal;
   window.handleGenderToggle = handleGenderToggle;
   window.showPerformerSelection = showPerformerSelection2;
-  window.handleChooseItem = handleChooseItem2;
+  window.handleChooseItem = handleChooseItem;
   var lastPath = "";
   var observer = new MutationObserver(() => {
     const currentPath = window.location.pathname;
