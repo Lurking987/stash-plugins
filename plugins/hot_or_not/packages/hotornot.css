@@ -825,6 +825,11 @@
    ============================================ */
 
 .hon-performer-selection {
+  width: 100%;
+  box-sizing: border-box;
+  align-self: stretch;
+  display: flex;          
+  flex-direction: column; 
   margin-bottom: 30px;
   padding: 20px;
   background: #1a1a1a;
@@ -842,10 +847,9 @@
 
 .hon-performer-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));  /* minmax(0,1fr) prevents overflow wrapping */
   gap: 15px;
-  max-width: 900px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 .hon-selection-card {
@@ -909,10 +913,9 @@
   color: #888;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 800px) {
   .hon-performer-list {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(3, 1fr);
   }
   
   .hon-selection-name {
@@ -1635,19 +1638,21 @@
 }
 
 #hon-performer-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); /* Force smaller columns */
-    gap: 10px;
-    width: 100%;
-}
-
-#hon-performer-list .hon-performer-card {
-    width: 100% !important;
-    max-width: 150px;
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 15px;
+  width: 100%;
 }
 
 #hon-performer-list img {
-    height: 150px !important; /* Force small height */
-    width: 100%;
-    object-fit: cover;
+  height: 150px !important;
+  width: 100%;
+  object-fit: cover;
+}
+
+.quality-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }

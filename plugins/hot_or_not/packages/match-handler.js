@@ -56,7 +56,7 @@ export async function handleChooseItem(event) {
 
     // B. Normal Gauntlet Climbing
     const outcome = await handleComparison(winnerId, loserId, winnerRating, loserRating, loserRank, winnerItem, loserItem);
-    updateGauntletState(winnerId, winnerItem, loserId, outcome.newWinnerRating);
+    updateGauntletState(winnerId, winnerItem, loserId, loserItem, outcome.newWinnerRating);
     applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome);
     return;
   }
@@ -77,7 +77,7 @@ export async function handleChooseItem(event) {
 /**
  * Updates Gauntlet progression state
  */
-function updateGauntletState(winnerId, winnerItem, loserId, newWinnerRating) {
+function updateGauntletState(winnerId, winnerItem, loserId, loserItem, newWinnerRating) {
   if (state.gauntletChampion?.id === winnerId) {
     state.gauntletDefeated.push(loserId);
     state.gauntletWins++;
@@ -85,7 +85,7 @@ function updateGauntletState(winnerId, winnerItem, loserId, newWinnerRating) {
   } else {
     if (state.gauntletChampion) {
       state.gauntletFalling = true;
-      state.gauntletFallingItem = state.currentPair.left.id === winnerId ? state.currentPair.right : state.currentPair.left;
+      state.gauntletFallingItem = loserItem;  // ← now properly in scope
       state.gauntletDefeated = [winnerId];
     }
     state.gauntletChampion = winnerItem;

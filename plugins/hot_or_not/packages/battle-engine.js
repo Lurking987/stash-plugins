@@ -198,8 +198,7 @@ export async function fetchChampionPairScenes() {
 
 export async function fetchSwissPairPerformers() {
   const genders = state.selectedGenders;
-  const randomGender = state.selectedGenders[Math.floor(Math.random() * state.selectedGenders.length)];
-  const performerFilter = getPerformerFilter(state.cachedUrlFilter, [randomGender]);
+  const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
   const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
   }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });

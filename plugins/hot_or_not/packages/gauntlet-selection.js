@@ -6,7 +6,7 @@ import { loadNewPair } from './battle-engine.js';
 /**
  * Fetches potential champions to start a Gauntlet
  */
-export async function fetchPerformersForSelection(count = 2) {
+export async function fetchPerformersForSelection(count = 5) {
   const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
   const total = await fetchPerformerCount(filter);
   const actualCount = Math.min(count, total);
@@ -54,7 +54,7 @@ export async function loadPerformerSelection() {
   if (!listEl) return;
 
   try {
-    const performers = await fetchPerformersForSelection(2);
+    const performers = await fetchPerformersForSelection(5);
     listEl.innerHTML = performers.map(p => createSelectionCard(p)).join('');
     
     listEl.querySelectorAll('.hon-selection-card').forEach(card => {
@@ -93,7 +93,7 @@ export function showPerformerSelection() {
 
   // 1. Toggle visibility
   if (selectionContainer) {
-    //selectionContainer.style.display = "block";
+    selectionContainer.style.display = "block";
     // 2. Trigger the data fetch (This keeps the rest of your code alive in the bundle)
     loadPerformerSelection(); 
   }
@@ -118,11 +118,11 @@ export function showPerformerSelection() {
     // Handle scenes, performers, and images
     let title, imagePath;
     
-    if (battleType === "performers") {
+    if (state.battleType === "performers") {
       // Performer
       title = item.name || `Performer #${item.id}`;
       imagePath = item.image_path;
-    } else if (battleType === "images") {
+    } else if (state.battleType === "images") {
       // Image
       title = `Image #${item.id}`;
       imagePath = item.paths && item.paths.thumbnail ? item.paths.thumbnail : null;
@@ -152,7 +152,7 @@ export function showPerformerSelection() {
         </div>
         <h3 class="hon-victory-name">${title}</h3>
         <p class="hon-victory-stats">
-          Rank <strong>#${rank}</strong> of ${totalItemsCount}<br>
+          Rank <strong>#${rank}</strong> of ${state.totalItemsCount}<br>
           Rating: <strong>${finalRating}/100</strong>
         </p>
         <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
@@ -166,11 +166,11 @@ export function showPerformerSelection() {
     if (actionsEl) actionsEl.style.display = "none";
     
     // Reset state
-    gauntletFalling = false;
-    gauntletFallingItem = null;
-    gauntletChampion = null;
-    gauntletWins = 0;
-    gauntletDefeated = [];
+    state.gauntletFalling = false;
+    state.gauntletFallingItem = null;
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
     
     // Attach button handler
     const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");

@@ -80,7 +80,10 @@ export function updatePerformerStats(currentStats, won) {
     last_match: new Date().toISOString()
   };
 
-  if (won === null) return newStats;
+  if (won === null) {
+    newStats.draws = (currentStats.draws || 0) + 1;  // ← add this
+    return newStats;
+  }
 
   newStats.wins = won ? currentStats.wins + 1 : currentStats.wins;
   newStats.losses = won ? currentStats.losses : currentStats.losses + 1;

@@ -190,8 +190,8 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     const winnerRankAtStart = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
     const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
     
-    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, winnerRankAtStart) || isFirstMatchGlobal);
-    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, loserRank) || isFirstMatchGlobal);
+    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
+    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId,  state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
     
     // Winner Status: true = win, false = loss, null = draw
     const winnerStatus = isDraw ? null : true;
@@ -283,32 +283,17 @@ export async function fetchImageCount() {
  * Fetches all performers who have a rating to generate the stats dashboard
  */
 export async function fetchAllPerformerStats() {
-    const query = `
-    query AllPerformerStats {
-      allPerformers {
-        id
-        name
-        rating100
-        details
+  const result = await graphqlQuery(`
+    query FindAllPerformers($filter: FindFilterType) {
+      findPerformers(filter: $filter) {
+        performers { ${PERFORMER_FRAGMENT} }
       }
-    }`;
-
-    try {
-        const result = await graphqlQuery(query);
-        const performers = result.allPerformers || [];
-        
-        // REMOVED the filter so unrated performers (null) show up
-        // We still sort them, treating null as 50
-        return performers.sort((a, b) => {
-            const rA = a.rating100 ?? 50;
-            const rB = b.rating100 ?? 50;
-            return rB - rA;
-        });
-    } catch (err) {
-        console.error("[HotOrNot] Failed to fetch all performer stats:", err);
-        throw err;
     }
-}  
+  `, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+  
+  const performers = result.findPerformers.performers || [];
+  return performers.sort((a, b) => (b.rating100 ?? 50) - (a.rating100 ?? 50));
+}
   
 /**
  * ============================================
@@ -367,51 +352,40 @@ export async function isBattleRankBadgeEnabled() {
  */
 export async function getPerformerBattleRank(performerId) {
   try {
-    // 1. Fetch ratings for ranking AND the target performer's custom fields
     const result = await graphqlQuery(`
-      query AllPerformersAndTargetStats($id: ID!) {
-        allPerformers {
-          id
-          rating100
+      query GetPerformerRank($id: ID!, $filter: FindFilterType) {
+        findPerformers(filter: $filter) {
+          performers {
+            id
+            rating100
+          }
         }
         findPerformer(id: $id) {
           custom_fields
         }
       }
-    `, { id: performerId });
+    `, { id: performerId, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
 
-    const allPerformers = result.allPerformers || [];
+    const allPerformers = result?.findPerformers?.performers || [];
     const targetPerformer = result.findPerformer;
 
-    // 2. Filter for those with ratings and sort descending to calculate Rank
-    const ratedPerformers = allPerformers
-      .filter(p => p.rating100 !== null)
-      .sort((a, b) => (b.rating100 || 0) - (a.rating100 || 0));
-
+    const ratedPerformers = allPerformers.filter(p => p.rating100 !== null);
     const total = ratedPerformers.length;
     const index = ratedPerformers.findIndex(p => p.id === performerId);
 
     if (index === -1) return null;
 
-    // 3. Parse the Stats JSON string from the custom field 'hotornot_stats'
     let stats = null;
     const statsJson = targetPerformer?.custom_fields?.["hotornot_stats"];
-    
     if (statsJson) {
       try {
-        // Since it's saved as a JSON string, we must parse it into an object
         stats = typeof statsJson === 'string' ? JSON.parse(statsJson) : statsJson;
       } catch (e) {
-        console.warn("[HotOrNot] Could not parse hotornot_stats for performer:", performerId);
+        console.warn("[HotOrNot] Could not parse hotornot_stats:", performerId);
       }
     }
 
-    return {
-      rank: index + 1,
-      total: total,
-      rating: ratedPerformers[index].rating100,
-      stats: stats // This is now the object { wins: X, losses: Y, ... }
-    };
+    return { rank: index + 1, total, rating: ratedPerformers[index].rating100, stats };
   } catch (err) {
     console.error("[HotOrNot] Error calculating rank:", err);
     return null;

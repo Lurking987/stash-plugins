@@ -61,11 +61,11 @@ export function createVictoryScreen(champion) {
     // Handle scenes, performers, and images
     let title, imagePath;
     
-    if (battleType === "performers") {
+    if (state.battleType === "performers") {
       // Performer
       title = champion.name || `Performer #${champion.id}`;
       imagePath = champion.image_path;
-    } else if (battleType === "images") {
+    } else if (state.battleType === "images") {
       // Image
       title = `Image #${champion.id}`;
       imagePath = champion.paths && champion.paths.thumbnail ? champion.paths.thumbnail : null;
@@ -83,7 +83,7 @@ export function createVictoryScreen(champion) {
       imagePath = champion.paths ? champion.paths.screenshot : null;
     }
     
-    const itemType = battleType === "performers" ? "performers" : (battleType === "images" ? "images" : "scenes");
+    const itemType = state.battleType === "performers" ? "performers" : (state.battleType === "images" ? "images" : "scenes");
     
     return `
       <div class="hon-victory-screen">
@@ -96,7 +96,7 @@ export function createVictoryScreen(champion) {
           }
         </div>
         <h3 class="hon-victory-name">${title}</h3>
-        <p class="hon-victory-stats">Conquered all ${totalItemsCount} ${itemType} with a ${gauntletWins} win streak!</p>
+        <p class="hon-victory-stats">Conquered all ${state.totalItemsCount} with ${state.gauntletWins} wins!</p>
         <button id="hon-new-gauntlet" class="btn btn-primary">Start New Gauntlet</button>
       </div>
     `;
@@ -176,17 +176,8 @@ export function attachEventListeners(parent = document) {
 			e.stopPropagation(); 
 		});
 	});
-
-	// 3. Winner Selection Logic
-	parent.querySelectorAll(".hon-performer-body").forEach(btnArea => {
-		btnArea.addEventListener("click", (e) => {
-			// e.stopPropagation() is not needed here, 
-			// but we ensure the handleChooseItem logic fires
-			handleChooseItem(e); 
-		});
-	});
 	
-    // 4. Skip Button (already looks good in your draft)
+    // 3. Skip Button (already looks good in your draft)
     const skipBtn = parent.querySelector("#hon-skip-btn");
     if (skipBtn) {
       skipBtn.style.display = (state.currentMode === 'swiss') ? 'block' : 'none';
@@ -195,14 +186,14 @@ export function attachEventListeners(parent = document) {
       };
     }
 
-    // 5. Gender Toggles
+    // 4. Gender Toggles
     parent.querySelectorAll(".hon-gender-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             handleGenderToggle(btn.dataset.gender);
         });
     });
 
-    // 6. Mode Switches
+    // 5. Mode Switches
     parent.querySelectorAll(".hon-mode-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             const newMode = btn.dataset.mode;
@@ -543,6 +534,7 @@ export function generateStatTables(processedPerformers) {
           <td>${p.total_matches}</td>
           <td class="hon-stats-positive">${p.wins}</td>
           <td class="hon-stats-negative">${p.losses}</td>
+		  <td>${p.draws || 0}</td>
           <td>${winRate}%</td>
           <td>${streakDisplay}</td>
           <td class="hon-stats-positive">${p.best_streak}</td>
@@ -560,7 +552,7 @@ export function generateStatTables(processedPerformers) {
           <table class="hon-stats-table">
             <thead>
               <tr>
-                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th><th>W</th><th>L</th><th>%</th><th>Streak</th><th>Best</th><th>Worst</th>
+                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th><th>W</th><th>L</th><th>D</th><th>%</th><th>Streak</th><th>Best</th><th>Worst</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -658,43 +650,33 @@ export function createBattleRankBadge(rank, total, rating, stats = null) {
  * Main Injection Logic
  */
 export async function injectBattleRankBadge() {
-  if (window._honBadgeInjectionInProgress) return;
-  
-  // 1. Extract Performer ID from URL (Robust check)
   const pathParts = window.location.pathname.split('/');
   const pIndex = pathParts.indexOf('performers');
   if (pIndex === -1 || !pathParts[pIndex + 1]) return;
   const performerId = pathParts[pIndex + 1];
 
-  window._honBadgeInjectionInProgress = true;
+  setTimeout(async () => {
+    if (window._honBadgeInjectionInProgress) return;
+    window._honBadgeInjectionInProgress = true;
+    try {
+      const ratingEl = document.querySelector(".quality-group");
 
-  try {
-    // 2. Wait slightly for Stash's React UI to render the header
-    setTimeout(async () => {
-      const target = document.querySelector(".performer-info") || 
-                     document.querySelector(".performer-header") ||
-                     document.querySelector(".row.align-items-center");
-
-      if (target && !document.getElementById("hon-battle-rank-badge")) {
-        // 3. Fetch the actual rank data
+      if (ratingEl && !document.getElementById("hon-battle-rank-badge")) {
         const rankInfo = await getPerformerBattleRank(performerId);
-        
-        // 4. Generate and Prepend
-        const badge = createBattleRankBadge(
-          rankInfo?.rank || '?', 
-          rankInfo?.total || '?', 
-          rankInfo?.rating || 50, 
-          rankInfo?.stats || null
-        );
-        
-        target.prepend(badge);
+        if (rankInfo) {
+          const badge = createBattleRankBadge(
+            rankInfo.rank,
+            rankInfo.total,
+            rankInfo.rating,
+            rankInfo.stats
+          );
+		  ratingEl.append(badge);
+        }
       }
+    } finally {
       window._honBadgeInjectionInProgress = false;
-    }, 200); // 200ms is the "sweet spot" for Stash UI injection
-  } catch (err) {
-    console.error("[HotOrNot] Badge injection failed:", err);
-    window._honBadgeInjectionInProgress = false;
-  }
+    }
+  }, 200);
 }
 
 export function showRatingAnimation(card, oldRating, newRating, change, isWinner) {
