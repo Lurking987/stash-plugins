@@ -1,4 +1,4 @@
-# Movie Scene Checker — Stash Plugin
+# Stash Group ADVE Movie Checker
 
 Compares the scenes inside a Stash **Group** (Movie) against the scene listing
 on **AdultDVDEmpire**, so you can see at a glance which scenes you own and
