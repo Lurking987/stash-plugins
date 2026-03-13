@@ -83,9 +83,10 @@
 .hon-vs-container {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 20px;
+  gap: 12px;
   align-items: stretch;
   width: 100%;
+  max-width: 960px;
 }
 .hon-scene-card {
   background: #1a1a1a;
@@ -201,7 +202,7 @@
 .hon-scene-image-container {
   position: relative;
   width: 100%;
-  max-height: 70vh;
+  max-height: 52vh;
   overflow: hidden;
   cursor: pointer;
   display: flex;
@@ -211,7 +212,7 @@
 .hon-performer-image-container {
   position: relative;
   width: 100%;
-  max-height: 60vh;
+  max-height: 46vh;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -220,7 +221,7 @@
 }
 .hon-scene-image {
   max-width: 100%;
-  max-height: 70vh;
+  max-height: 52vh;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -230,7 +231,7 @@
 .hon-performer-image {
   display: block;
   max-width: 100%;
-  max-height: 60vh;
+  max-height: 46vh;
   width: auto;
   height: auto;
   object-fit: contain;

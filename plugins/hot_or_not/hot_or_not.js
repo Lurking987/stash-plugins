@@ -773,6 +773,29 @@
   });
 
   // api-client.js
+  var api_client_exports = {};
+  __export(api_client_exports, {
+    IMAGE_FRAGMENT: () => IMAGE_FRAGMENT,
+    PERFORMER_FRAGMENT: () => PERFORMER_FRAGMENT,
+    SCENE_FRAGMENT: () => SCENE_FRAGMENT,
+    fetchAllPerformerStats: () => fetchAllPerformerStats,
+    fetchImageCount: () => fetchImageCount,
+    fetchPerformerById: () => fetchPerformerById,
+    fetchPerformerCount: () => fetchPerformerCount,
+    fetchRandomImages: () => fetchRandomImages,
+    fetchRandomPerformers: () => fetchRandomPerformers,
+    fetchRandomScenes: () => fetchRandomScenes,
+    fetchSceneCount: () => fetchSceneCount,
+    getHotOrNotConfig: () => getHotOrNotConfig,
+    getPerformerBattleRank: () => getPerformerBattleRank,
+    graphqlQuery: () => graphqlQuery,
+    handleComparison: () => handleComparison,
+    isBattleRankBadgeEnabled: () => isBattleRankBadgeEnabled,
+    updateImageRating: () => updateImageRating,
+    updateItemRating: () => updateItemRating,
+    updatePerformerRating: () => updatePerformerRating,
+    updateSceneRating: () => updateSceneRating
+  });
   async function graphqlQuery(query, variables = {}) {
     if (typeof PluginApi !== "undefined" && PluginApi.utils?.StashService?.getClient && PluginApi.libraries?.Apollo) {
       try {
@@ -877,7 +900,7 @@
         const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
         const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
         const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
         if (isChampionWinner || isFallingWinner) {
           winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
@@ -889,13 +912,13 @@
           loserLoss = 1;
         }
       } else if (state.currentMode === "champion") {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
         const loserK = getKFactor(loserRating, loserMatchCount, "champion");
         winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
         loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
       } else {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
         const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
         winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
@@ -1004,6 +1027,17 @@
       i: { id, rating100: Math.max(1, Math.min(100, Math.round(rating))) }
     });
   }
+  async function getHotOrNotConfig() {
+    if (pluginConfigCache)
+      return pluginConfigCache;
+    const result = await graphqlQuery(`query { configuration { plugins } }`);
+    pluginConfigCache = (result.configuration.plugins || {})["HotOrNot"] || {};
+    return pluginConfigCache;
+  }
+  async function isBattleRankBadgeEnabled() {
+    const config = await getHotOrNotConfig();
+    return config.showBattleRankBadge !== false;
+  }
   async function getPerformerBattleRank(performerId) {
     try {
       const result = await graphqlQuery(`
@@ -1041,7 +1075,7 @@
       return null;
     }
   }
-  var SCENE_FRAGMENT, PERFORMER_FRAGMENT, IMAGE_FRAGMENT;
+  var SCENE_FRAGMENT, PERFORMER_FRAGMENT, IMAGE_FRAGMENT, pluginConfigCache;
   var init_api_client = __esm({
     "api-client.js"() {
       init_parsers();
@@ -1050,10 +1084,18 @@
       SCENE_FRAGMENT = `id title date rating100 paths { screenshot preview } files { duration path } studio { name } performers { name } tags { name }`;
       PERFORMER_FRAGMENT = `id name image_path rating100 details custom_fields birthdate ethnicity country gender`;
       IMAGE_FRAGMENT = `id rating100 paths { thumbnail image }`;
+      pluginConfigCache = null;
     }
   });
 
   // gauntlet-selection.js
+  var gauntlet_selection_exports = {};
+  __export(gauntlet_selection_exports, {
+    fetchPerformersForSelection: () => fetchPerformersForSelection,
+    loadPerformerSelection: () => loadPerformerSelection,
+    showPerformerSelection: () => showPerformerSelection,
+    showPlacementScreen: () => showPlacementScreen
+  });
   async function fetchPerformersForSelection(count = 5) {
     const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
     const total = await fetchPerformerCount(filter);
@@ -1402,7 +1444,14 @@
       btn.onclick = () => {
         state.gauntletChampion = null;
         state.gauntletWins = 0;
-        loadNewPair();
+        state.gauntletDefeated = [];
+        state.gauntletFalling = false;
+        state.gauntletFallingItem = null;
+        if (state.currentMode === "gauntlet" && state.battleType === "performers") {
+          Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.showPerformerSelection());
+        } else {
+          loadNewPair();
+        }
       };
     }
   }
@@ -1663,7 +1712,31 @@
     return groups.join("");
   }
   function generateBarGroups(ratingBuckets) {
+    const totalPerformers = ratingBuckets.reduce((s, c) => s + c, 0);
     const maxBucket = Math.max(...ratingBuckets, 1);
+    const isClustered = totalPerformers > 0 && maxBucket / totalPerformers > 0.5;
+    if (isClustered) {
+      const grouped = [];
+      for (let i = 0; i <= 100; i += 5) {
+        const count = ratingBuckets.slice(i, i + 5).reduce((s, c) => s + c, 0);
+        grouped.push({ label: `${i}\u2013${Math.min(i + 4, 100)}`, count });
+      }
+      const groupMax = Math.max(...grouped.map((g) => g.count), 1);
+      return grouped.map(({ label, count }) => {
+        if (count === 0)
+          return "";
+        const percentage = count / groupMax * 100;
+        return `
+        <div class="hon-bar-container" title="Rating ${label}: ${count} performers">
+          <div class="hon-bar-label" style="min-width:60px">${label}</div>
+          <div class="hon-bar-wrapper">
+            <div class="hon-bar" style="width: ${percentage}%">
+              ${count > 2 ? `<span class="hon-bar-count">${count}</span>` : ""}
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+    }
     return ratingBuckets.map((count, i) => {
       if (count === 0)
         return "";
@@ -1721,7 +1794,8 @@
     shouldShowButton: () => shouldShowButton
   });
   function shouldShowButton() {
-    return ["/performers", "/performers/", "/images", "/images/"].includes(window.location.pathname);
+    const path = window.location.pathname;
+    return /^\/performers/.test(path) || /^\/images/.test(path);
   }
   function addFloatingButton() {
     if (document.getElementById("hon-floating-btn"))
@@ -1736,7 +1810,7 @@
     document.body.appendChild(btn);
   }
   function handleGlobalKeys(e) {
-    const activeModal = document.getElementById("hon-modal-container");
+    const activeModal = document.getElementById("hon-modal");
     if (!activeModal) {
       document.removeEventListener("keydown", handleGlobalKeys);
       return;
@@ -1746,20 +1820,20 @@
       e.stopImmediatePropagation();
       e.preventDefault();
       if (e.key === "ArrowLeft") {
-        activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+        const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"]');
+        leftCard?.querySelector(".hon-scene-body")?.click();
       }
       if (e.key === "ArrowRight") {
-        activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+        const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"]');
+        rightCard?.querySelector(".hon-scene-body")?.click();
       }
       if (e.key === " " || e.code === "Space") {
         document.getElementById("hon-skip-btn")?.click();
       }
     }
   }
-  function openRankingModal() {
+  function _buildAndOpenModal() {
     try {
-      const path = window.location.pathname;
-      state.battleType = path.includes("/images") ? "images" : "performers";
       const existing = document.getElementById("hon-modal");
       if (existing)
         existing.remove();
@@ -1777,11 +1851,53 @@
       modal.querySelector(".hon-modal-backdrop").onclick = () => closeRankingModal();
       attachEventListeners(modal);
       if (state.currentMode === "gauntlet") {
-        window.showPerformerSelection();
+        if (state.gauntletChampion) {
+          const selEl = document.getElementById("hon-performer-selection");
+          const compEl = document.getElementById("hon-comparison-area");
+          const actEl = document.querySelector(".hon-actions");
+          if (selEl)
+            selEl.style.display = "none";
+          if (compEl)
+            compEl.style.display = "";
+          if (actEl)
+            actEl.style.display = "";
+          loadNewPair();
+        } else {
+          window.showPerformerSelection();
+        }
       } else {
         loadNewPair();
       }
       document.addEventListener("keydown", handleGlobalKeys);
+    } catch (err) {
+      console.error("CRASH in _buildAndOpenModal:", err);
+    }
+  }
+  function openRankingModal() {
+    try {
+      const path = window.location.pathname;
+      state.battleType = path.includes("/images") ? "images" : "performers";
+      const performerMatch = path.match(/\/performers\/(\d+)/);
+      if (performerMatch && state.currentMode === "gauntlet") {
+        const performerId = performerMatch[1];
+        Promise.resolve().then(() => (init_api_client(), api_client_exports)).then(async ({ fetchPerformerById: fetchPerformerById2 }) => {
+          try {
+            const performer = await fetchPerformerById2(performerId);
+            if (performer) {
+              state.gauntletChampion = performer;
+              state.gauntletWins = 0;
+              state.gauntletDefeated = [];
+              state.gauntletFalling = false;
+              state.gauntletFallingItem = null;
+            }
+          } catch (e) {
+            console.warn("[HotOrNot] Could not pre-seed performer for gauntlet:", e);
+          }
+          _buildAndOpenModal();
+        });
+        return;
+      }
+      _buildAndOpenModal();
     } catch (err) {
       console.error("CRASH in openRankingModal:", err);
     }
@@ -1806,16 +1922,17 @@
   // ui-dashboard.js
   function createMainUI() {
     const isPerformers = state.battleType === "performers";
-    const MODE_LABELS = {
-      swiss: "\u2696\uFE0F Swiss",
-      gauntlet: "\u{1F94A} Gauntlet",
-      champion: "\u{1F451} Champion"
+    const MODE_CONFIG = {
+      swiss: { icon: "\u2696\uFE0F", label: "Swiss" },
+      gauntlet: { icon: "\u{1F94A}", label: "Gauntlet" },
+      champion: { icon: "\u{1F451}", label: "Champion" }
     };
     const modeToggleHTML = state.battleType !== "images" ? `
     <div class="hon-mode-toggle">
       ${["swiss", "gauntlet", "champion"].map((mode) => `
         <button class="hon-mode-btn ${state.currentMode === mode ? "active" : ""}" data-mode="${mode}">
-          ${MODE_LABELS[mode]}
+          <span class="hon-mode-icon">${MODE_CONFIG[mode].icon}</span>
+          <span class="hon-mode-title">${MODE_CONFIG[mode].label}</span>
         </button>`).join("")}
     </div>` : "";
     const genderFilterHTML = isPerformers ? `
@@ -2122,6 +2239,7 @@ Match Stats:`;
   // main.js
   init_state();
   init_ui_manager();
+  init_ui_modal();
   init_gauntlet_selection();
   init_match_handler();
   init_api_client();
@@ -2135,7 +2253,12 @@ Match Stats:`;
   var lastPath = "";
   var observer = new MutationObserver(() => {
     const currentPath = window.location.pathname;
-    if (!document.getElementById("hon-floating-btn")) {
+    const existingBtn = document.getElementById("hon-floating-btn");
+    if (existingBtn) {
+      if (!shouldShowButton()) {
+        existingBtn.remove();
+      }
+    } else if (shouldShowButton()) {
       addFloatingButton();
     }
     if (isOnSinglePerformerPage()) {
