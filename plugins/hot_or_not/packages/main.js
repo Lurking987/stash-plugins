@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import * as UI from './ui-manager.js';
+import { shouldShowButton } from './ui-modal.js';
 import * as Gauntlet from './gauntlet-selection.js';
 import * as Match from './match-handler.js';
 import * as API from './api-client.js';
@@ -20,8 +21,14 @@ let lastPath = "";
 const observer = new MutationObserver(() => {
   const currentPath = window.location.pathname;
 
-  // Re-inject Floating Button if it's missing
-  if (!document.getElementById("hon-floating-btn")) {
+  // Remove floating button if we've navigated away from a valid page
+  const existingBtn = document.getElementById("hon-floating-btn");
+  if (existingBtn) {
+    if (!shouldShowButton()) {
+      existingBtn.remove();
+    }
+  } else if (shouldShowButton()) {
+    // Re-inject if missing and we're on a valid page
     UI.addFloatingButton();
   }
 

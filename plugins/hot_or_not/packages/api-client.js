@@ -152,7 +152,7 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
         const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
         const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
         
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
         
         if (isChampionWinner || isFallingWinner) {
@@ -165,7 +165,7 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
           loserLoss = 1;
         }
       } else if (state.currentMode === "champion") {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
         const loserK = getKFactor(loserRating, loserMatchCount, "champion");
         
@@ -173,7 +173,7 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
         loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
       } else {
         // Swiss Mode Default
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 40));
+        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
         const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
         const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
         

@@ -157,8 +157,35 @@ export function generateStatTables(processedPerformers) {
 }
 
 export function generateBarGroups(ratingBuckets) {
+  // Determine if data is heavily clustered (top bucket holds >50% of non-zero total)
+  const totalPerformers = ratingBuckets.reduce((s, c) => s + c, 0);
   const maxBucket = Math.max(...ratingBuckets, 1);
+  const isClustered = totalPerformers > 0 && (maxBucket / totalPerformers) > 0.5;
 
+  // When clustered, group into ranges of 5 to spread differences
+  if (isClustered) {
+    const grouped = [];
+    for (let i = 0; i <= 100; i += 5) {
+      const count = ratingBuckets.slice(i, i + 5).reduce((s, c) => s + c, 0);
+      grouped.push({ label: `${i}–${Math.min(i + 4, 100)}`, count });
+    }
+    const groupMax = Math.max(...grouped.map(g => g.count), 1);
+    return grouped.map(({ label, count }) => {
+      if (count === 0) return '';
+      const percentage = (count / groupMax) * 100;
+      return `
+        <div class="hon-bar-container" title="Rating ${label}: ${count} performers">
+          <div class="hon-bar-label" style="min-width:60px">${label}</div>
+          <div class="hon-bar-wrapper">
+            <div class="hon-bar" style="width: ${percentage}%">
+              ${count > 2 ? `<span class="hon-bar-count">${count}</span>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // Default: per-point bars
   return ratingBuckets.map((count, i) => {
     if (count === 0) return '';
     const percentage = (count / maxBucket) * 100;

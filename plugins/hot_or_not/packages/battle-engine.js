@@ -104,10 +104,17 @@ function attachVictoryHandlers(area) {
   const btn = area.querySelector("#hon-new-gauntlet");
   if (btn) {
     btn.onclick = () => {
-      // Logic to reset state and call loadNewPair()
       state.gauntletChampion = null;
       state.gauntletWins = 0;
-      loadNewPair();
+      state.gauntletDefeated = [];
+      state.gauntletFalling = false;
+      state.gauntletFallingItem = null;
+      // Return to performer selection instead of jumping straight into a match
+      if (state.currentMode === "gauntlet" && state.battleType === "performers") {
+        import('./gauntlet-selection.js').then(m => m.showPerformerSelection());
+      } else {
+        loadNewPair();
+      }
     };
   }
 }

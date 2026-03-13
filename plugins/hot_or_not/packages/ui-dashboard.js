@@ -12,17 +12,18 @@ import { handleSkip } from './match-handler.js';
 export function createMainUI() {
   const isPerformers = state.battleType === "performers";
 
-  const MODE_LABELS = {
-    swiss: "⚖️ Swiss",
-    gauntlet: "🥊 Gauntlet",
-    champion: "👑 Champion"
+  const MODE_CONFIG = {
+    swiss:    { icon: "⚖️",  label: "Swiss" },
+    gauntlet: { icon: "🥊", label: "Gauntlet" },
+    champion: { icon: "👑", label: "Champion" },
   };
 
   const modeToggleHTML = state.battleType !== "images" ? `
     <div class="hon-mode-toggle">
       ${['swiss', 'gauntlet', 'champion'].map(mode => `
         <button class="hon-mode-btn ${state.currentMode === mode ? 'active' : ''}" data-mode="${mode}">
-          ${MODE_LABELS[mode]}
+          <span class="hon-mode-icon">${MODE_CONFIG[mode].icon}</span>
+          <span class="hon-mode-title">${MODE_CONFIG[mode].label}</span>
         </button>`).join('')}
     </div>` : '';
 

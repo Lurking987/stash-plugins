@@ -9,7 +9,8 @@ import { createMainUI, attachEventListeners } from './ui-dashboard.js';
  */
 
 export function shouldShowButton() {
-  return ['/performers', '/performers/', '/images', '/images/'].includes(window.location.pathname);
+  const path = window.location.pathname;
+  return /^\/performers/.test(path) || /^\/images/.test(path);
 }
 
 export function addFloatingButton() {
@@ -26,7 +27,7 @@ export function addFloatingButton() {
 
 // Declared outside so closeRankingModal can remove the same reference
 function handleGlobalKeys(e) {
-  const activeModal = document.getElementById("hon-modal-container");
+  const activeModal = document.getElementById("hon-modal");
   if (!activeModal) {
     document.removeEventListener("keydown", handleGlobalKeys);
     return;
@@ -38,10 +39,12 @@ function handleGlobalKeys(e) {
     e.preventDefault();
 
     if (e.key === "ArrowLeft") {
-      activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+      const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"]');
+      leftCard?.querySelector('.hon-scene-body')?.click();
     }
     if (e.key === "ArrowRight") {
-      activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+      const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"]');
+      rightCard?.querySelector('.hon-scene-body')?.click();
     }
     if (e.key === " " || e.code === "Space") {
       document.getElementById("hon-skip-btn")?.click();
@@ -49,11 +52,8 @@ function handleGlobalKeys(e) {
   }
 }
 
-export function openRankingModal() {
+function _buildAndOpenModal() {
   try {
-    const path = window.location.pathname;
-    state.battleType = path.includes('/images') ? "images" : "performers";
-
     const existing = document.getElementById("hon-modal");
     if (existing) existing.remove();
 
@@ -74,12 +74,56 @@ export function openRankingModal() {
     attachEventListeners(modal);
 
     if (state.currentMode === "gauntlet") {
-      window.showPerformerSelection();
+      // If champion already seeded (from performer page), skip selection screen
+      if (state.gauntletChampion) {
+        const selEl = document.getElementById("hon-performer-selection");
+        const compEl = document.getElementById("hon-comparison-area");
+        const actEl = document.querySelector(".hon-actions");
+        if (selEl) selEl.style.display = "none";
+        if (compEl) compEl.style.display = "";
+        if (actEl) actEl.style.display = "";
+        loadNewPair();
+      } else {
+        window.showPerformerSelection();
+      }
     } else {
       loadNewPair();
     }
 
     document.addEventListener("keydown", handleGlobalKeys);
+  } catch (err) {
+    console.error("CRASH in _buildAndOpenModal:", err);
+  }
+}
+
+export function openRankingModal() {
+  try {
+    const path = window.location.pathname;
+    state.battleType = path.includes('/images') ? "images" : "performers";
+
+    // If on a single performer page in Gauntlet mode, pre-seed that performer as champion
+    const performerMatch = path.match(/\/performers\/(\d+)/);
+    if (performerMatch && state.currentMode === "gauntlet") {
+      const performerId = performerMatch[1];
+      import('./api-client.js').then(async ({ fetchPerformerById }) => {
+        try {
+          const performer = await fetchPerformerById(performerId);
+          if (performer) {
+            state.gauntletChampion = performer;
+            state.gauntletWins = 0;
+            state.gauntletDefeated = [];
+            state.gauntletFalling = false;
+            state.gauntletFallingItem = null;
+          }
+        } catch (e) {
+          console.warn("[HotOrNot] Could not pre-seed performer for gauntlet:", e);
+        }
+        _buildAndOpenModal();
+      });
+      return;
+    }
+
+    _buildAndOpenModal();
   } catch (err) {
     console.error("CRASH in openRankingModal:", err);
   }
