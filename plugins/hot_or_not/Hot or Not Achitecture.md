@@ -1,4 +1,48 @@
-# `pi-client.js` – Graphql Query, Rating Updates & Rank Logic
+# 📚 HotOrNot Plugin – Table of Contents  
+  
+## Core System  
+- [[#`hotornot.js` – Bootstrapper]]
+- [[#`main.js` – DOM Manager, Runtime Controller]]
+- [[#`constants.js` – Filter Behavior, Gender Options, Country names]]
+  
+---  
+  
+## Battle Engine  
+- [[#`battle-engine.js` – Matchmaking logic, UI Render]]
+- [[#`match-handler.js` – Handles Battle Outcomes & Progression]]
+- [[#`gauntlet-selection.js` – Gauntlet Mode Handler]]
+  
+---  
+  
+## API & Data  
+- [[Hot or Not Achitecture#`api-client.js` – Graphql Query, Rating Updates & Rank Logic]]
+- [[#`parsers.js` – URL Filter Parsing & GraphQL Conversion]]
+  
+---  
+  
+## Math & Utilities  
+- [[#`math-utils.js` – Rating & Matchmaking Utilities]]
+- [[#`formatters.js` – UI Data Format Display]]
+  
+---  
+
+## UI System  
+  
+### Core UI  
+- [[#`ui-manager.js` – UI Barrel Export]]
+- [[Hot or Not Achitecture#`ui-dashboard.js` – Main Dashboard & Event Handling]]
+- [[#`ui-modal.js` – Navigation & Modal Control]]
+  
+### UI Components  
+- [[#`ui-cards.js` – Card Rendering & Victory Screen]]
+- [[#`ui-badge.js` – UI Helpers for Badges, Placement, and Animations]]
+  
+### UI Analytics  
+- [[#`ui-stats.js` – Stats Modal & Leaderboards]]
+--- 
+
+
+# `api-client.js` – Graphql Query, Rating Updates & Rank Logic
 
 Purpose:  
 Handles **GraphQL communication, data fetching, rating updates, and ranking logic** for the **HotOrNot Stash plugin**.
@@ -3349,8 +3393,6 @@ This module handles the **statistics modal** for performers, including leaderboa
     
 
 ---
-
-At this point, we’ve covered all the core UI modules:
 
 |Module|Purpose|
 |---|---|
