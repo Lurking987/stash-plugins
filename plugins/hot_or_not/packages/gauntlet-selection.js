@@ -1,6 +1,6 @@
 import { graphqlQuery, PERFORMER_FRAGMENT, fetchPerformerCount } from './api-client.js';
 import { getPerformerFilter } from './parsers.js';
-import { state } from './state.js';
+import { resetBattleState, state } from './state.js';
 import { loadNewPair } from './battle-engine.js';
 
 /**
@@ -69,17 +69,21 @@ export async function loadPerformerSelection() {
 }
 
 function startGauntletWithPerformer(performer) {
-  // Update the global state
+  resetBattleState();
+
+  // ⭐ Store the selected champion
   state.gauntletChampion = performer;
   state.gauntletWins = 0;
-  state.gauntletDefeated = [];
   state.gauntletFalling = false;
-  
-  // Toggle UI visibility
-  document.getElementById("hon-performer-selection").style.display = "none";
-  document.getElementById("hon-comparison-area").style.display = "";
-  document.querySelector(".hon-actions").style.display = "";
-  
+
+  const sel = document.getElementById("hon-performer-selection");
+  const comp = document.getElementById("hon-comparison-area");
+  const actions = document.querySelector(".hon-actions");
+
+  if (sel) sel.style.display = "none";
+  if (comp) comp.style.display = "";
+  if (actions) actions.style.display = "";
+
   loadNewPair();
 }
 
@@ -91,25 +95,20 @@ export function showPerformerSelection() {
   const comparisonArea = document.getElementById("hon-comparison-area");
   const actionsEl = document.querySelector(".hon-actions");
 
-  // 1. Toggle visibility
   if (selectionContainer) {
     selectionContainer.style.display = "block";
-    // 2. Trigger the data fetch (This keeps the rest of your code alive in the bundle)
-    loadPerformerSelection(); 
+    loadPerformerSelection();
   }
-  
+
   if (comparisonArea) comparisonArea.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
 
-  // 3. Fix the "mainContainer" error from before:
-  // Instead of mainContainer.classList.remove(...), we use the modal ID
   const modal = document.getElementById("hon-modal");
   if (modal) {
     modal.classList.remove("hon-mode-champion", "hon-mode-swiss");
     modal.classList.add("hon-mode-gauntlet");
   }
 }
-
 
  export function showPlacementScreen(item, rank, finalRating) {
     const comparisonArea = document.getElementById("hon-comparison-area");
@@ -166,11 +165,7 @@ export function showPerformerSelection() {
     if (actionsEl) actionsEl.style.display = "none";
     
     // Reset state
-    state.gauntletFalling = false;
-    state.gauntletFallingItem = null;
-    state.gauntletChampion = null;
-    state.gauntletWins = 0;
-    state.gauntletDefeated = [];
+  resetBattleState();
     
     // Attach button handler
     const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");

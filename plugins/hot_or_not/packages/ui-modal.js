@@ -43,10 +43,17 @@ export function addFloatingButton() {
   const buttonContainer = document.createElement("div");
   buttonContainer.className = "col-4 col-sm-3 col-md-2 col-lg-auto nav-link";
 
-  // Inner button styled like others
+  // Inner button styled exactly like the Performers button
   buttonContainer.innerHTML = `
     <a href="javascript:void(0);" id="${buttonId}" class="minimal p-4 p-xl-2 d-flex d-xl-inline-block flex-column justify-content-between align-items-center btn btn-primary" title="HotOrNot">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" class="plugin_hon__flame">
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        viewBox="0 0 16 16" 
+        class="plugin_hon__flame svg-inline--fa fa-icon nav-menu-icon d-block d-xl-inline mb-2 mb-xl-0" 
+        fill="currentColor"
+        aria-hidden="true" 
+        focusable="false" 
+        role="img">
         <path d="M8 0c-.2 3.5-2 5-3 6-1 1-1 3-1 4s1 3 3 3 4-1 4-3c0-2-2-3-2-5 0-1 1-2 1-2S9.5 0 8 0z"/>
       </svg>
       <span>HotOrNot</span>
@@ -83,25 +90,29 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
-  if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
-    e.stopImmediatePropagation();
+  const isSpace = e.key === " " || e.code === "Space";
+  const hotKeys = ["ArrowLeft", "ArrowRight", ... (isSpace ? [" ", "Space"] : [])];
+
+  if (hotKeys.includes(e.key) || (e.code && hotKeys.includes(e.code))) {
+    // Prevent scrolling when pressing space
     e.preventDefault();
+    e.stopImmediatePropagation();
 
     if (e.key === "ArrowLeft") {
-      const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"]');
-      leftCard?.querySelector('.hon-scene-body')?.click();
-    }
-    if (e.key === "ArrowRight") {
-      const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"]');
-      rightCard?.querySelector('.hon-scene-body')?.click();
-    }
-    if (e.key === " " || e.code === "Space") {
-      document.getElementById("hon-skip-btn")?.click();
+      activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+    } else if (e.key === "ArrowRight") {
+      activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+    } else if (isSpace) {
+      // Try to find the skip button - check for both standard and gauntlet IDs
+      const skipBtn = document.getElementById("hon-skip-btn") || 
+                      activeModal.querySelector(".hon-gauntlet-skip"); // adjust selector if gauntlet uses a class
+      
+      if (skipBtn) {
+        skipBtn.click();
+      }
     }
   }
 }
-
 function _buildAndOpenModal() {
   try {
     const existing = document.getElementById("hon-modal");
@@ -146,39 +157,55 @@ function _buildAndOpenModal() {
   }
 }
 
-export function openRankingModal() {
+export async function openRankingModal() {
   try {
     const path = window.location.pathname;
-    state.battleType = path.includes('/images') ? "images" : "performers";
-
-    // If on a single performer page in Gauntlet mode, pre-seed that performer as champion
     const performerMatch = path.match(/\/performers\/(\d+)/);
-    if (performerMatch && state.currentMode === "gauntlet") {
+    const isSinglePerformerPage = !!performerMatch;
+
+    // 1. If we are on a performer page
+    if (isSinglePerformerPage) {
       const performerId = performerMatch[1];
-      import('./api-client.js').then(async ({ fetchPerformerById }) => {
-        try {
-          const performer = await fetchPerformerById(performerId);
-          if (performer) {
-            state.gauntletChampion = performer;
-            state.gauntletWins = 0;
-            state.gauntletDefeated = [];
-            state.gauntletFalling = false;
-            state.gauntletFallingItem = null;
-          }
-        } catch (e) {
-          console.warn("[HotOrNot] Could not pre-seed performer for gauntlet:", e);
-        }
+      
+      // ⭐ CHECK: If a gauntlet is already running for THIS performer, just open the modal
+      if (state.currentMode === "gauntlet" && 
+          state.gauntletChampion && 
+          state.gauntletChampion.id.toString() === performerId) {
+        console.log("[HotOrNot] Resuming existing Gauntlet run.");
         _buildAndOpenModal();
-      });
-      return;
+        return; 
+      }
+
+      // Otherwise, initialize a NEW gauntlet run
+      state.battleType = "performers";
+      state.currentMode = "gauntlet";
+      
+      const { fetchPerformerById } = await import('./api-client.js');
+      try {
+        const performer = await fetchPerformerById(performerId);
+        if (performer) {
+          state.gauntletChampion = performer;
+          state.gauntletWins = 0;
+          state.gauntletDefeated = [];
+          state.gauntletFalling = false;
+          state.gauntletFallingItem = null;
+        }
+      } catch (e) {
+        console.warn("[HotOrNot] Could not pre-seed performer:", e);
+      }
+    } else {
+      // Logic for non-performer pages (Swiss Mode)
+      state.battleType = path.includes('/images') ? "images" : "performers";
+      state.currentMode = "swiss";
+      state.gauntletChampion = null;
     }
 
     _buildAndOpenModal();
+
   } catch (err) {
     console.error("CRASH in openRankingModal:", err);
   }
 }
-
 export function closeRankingModal() {
   const gameModal = document.getElementById("hon-modal");
   const statsModal = document.getElementById("hon-stats-modal");
