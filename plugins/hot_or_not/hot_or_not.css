@@ -10,6 +10,16 @@
   padding: 15px;
   border-radius: 10px;
 }
+.plugin_hon__flame {
+  fill: white;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px; /* space between flame and text */
+  vertical-align: middle;
+}
+#plugin_hon span {
+  display: inline-block; /* keep text inline with icon */
+}
 .hon-header {
   width: 100%;
   text-align: center;
@@ -1416,3 +1426,7 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+/* ==========================
+   Card Layout & Image Fixes
+   ========================== */
+

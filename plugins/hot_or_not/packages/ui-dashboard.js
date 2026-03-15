@@ -27,6 +27,8 @@ export function createMainUI() {
         </button>`).join('')}
     </div>` : '';
 
+state.selectedGenders = ["FEMALE"];
+
   const genderFilterHTML = isPerformers ? `
     <div class="hon-gender-filter">
       <div class="hon-gender-btns">

@@ -9,6 +9,6 @@
     "minify": "esbuild main.js --bundle --minify --format=iife --platform=browser --outfile=hot_or_not.min.js"
   },
   "devDependencies": {
-    "esbuild": "^0.20.0"
+    "esbuild": "^0.20.2"
   }
 }
