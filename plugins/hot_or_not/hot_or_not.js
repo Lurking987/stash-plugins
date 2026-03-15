@@ -35,7 +35,7 @@
         cachedUrlFilter: null,
         badgeInjectionInProgress: false,
         pluginConfigCache: null,
-        selectedGenders: ["FEMALE", "NON_BINARY"]
+        selectedGenders: ["FEMALE"]
       };
     }
   });
@@ -308,159 +308,6 @@
     }
   });
 
-  // formatters.js
-  function getGenderDisplay(gender) {
-    if (!gender)
-      return "";
-    return (ALL_GENDERS.find((g) => g.value === gender) || { label: gender }).label;
-  }
-  function formatDuration(seconds) {
-    if (!seconds)
-      return "N/A";
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor(seconds % 3600 / 60);
-    const s = Math.floor(seconds % 60);
-    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${m}:${s.toString().padStart(2, "0")}`;
-  }
-  function escapeHtml(unsafe) {
-    if (!unsafe)
-      return "";
-    return String(unsafe).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
-  function getCountryDisplay(countryCode) {
-    if (!countryCode)
-      return "";
-    const code = countryCode.toUpperCase().trim();
-    const name = COUNTRY_NAMES[code] || escapeHtml(code);
-    const flagClass = `fi fi-${code.toLowerCase().replace(/[^a-z]/g, "")}`;
-    return `<span class="${flagClass}"></span> ${name}`;
-  }
-  var init_formatters = __esm({
-    "formatters.js"() {
-      init_constants();
-    }
-  });
-
-  // ui-cards.js
-  function renderCard(item, side, rank) {
-    const streak = state.gauntletChampion?.id === item.id ? state.gauntletWins : null;
-    if (state.battleType === "performers")
-      return createPerformerCard(item, side, rank, streak);
-    if (state.battleType === "images")
-      return createImageCard(item, side, rank, streak);
-    return createSceneCard(item, side, rank, streak);
-  }
-  function createSceneCard(scene, side, rank = null, streak = null) {
-    const file = scene.files?.[0] || {};
-    const performers = scene.performers?.map((p) => p.name).join(", ") || "No performers";
-    const studio = scene.studio?.name || "No studio";
-    const title = scene.title || file.path?.split(/[/\\]/).pop().replace(/\.[^/.]+$/, "") || `Scene #${scene.id}`;
-    const screenshotPath = scene.paths?.screenshot;
-    const previewPath = scene.paths?.preview;
-    const stashRating = scene.rating100 ? `${scene.rating100}/100` : "Unrated";
-    const rankDisplay = rank != null ? `<span class="hon-scene-rank">${typeof rank === "number" ? "#" + rank : rank}</span>` : "";
-    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} win${streak > 1 ? "s" : ""}</div>` : "";
-    return `
-    <div class="hon-scene-card" data-scene-id="${scene.id}" data-side="${side}" data-rating="${scene.rating100 || 50}">
-      <div class="hon-scene-image-container" data-scene-url="/scenes/${scene.id}">
-        ${screenshotPath ? `<img class="hon-scene-image" src="${screenshotPath}" alt="${title}" loading="lazy" />` : `<div class="hon-scene-image hon-no-image">No Screenshot</div>`}
-        ${previewPath ? `<video class="hon-hover-preview" src="${previewPath}" loop playsinline></video>` : ""}
-        <div class="hon-scene-duration">${formatDuration(file.duration)}</div>
-        ${streakDisplay}
-        <div class="hon-click-hint">Click to open scene</div>
-      </div>
-      <div class="hon-scene-body" data-winner="${scene.id}">
-        <div class="hon-scene-info">
-          <div class="hon-scene-title-row"><h3 class="hon-scene-title">${title}</h3>${rankDisplay}</div>
-          <div class="hon-scene-meta">
-            <div class="hon-meta-item"><strong>Studio:</strong> ${studio}</div>
-            <div class="hon-meta-item"><strong>Performers:</strong> ${performers}</div>
-            <div class="hon-meta-item"><strong>Rating:</strong> ${stashRating}</div>
-          </div>
-        </div>
-        <div class="hon-choose-btn">\u2713 Choose This Scene</div>
-      </div>
-    </div>`;
-  }
-  function createPerformerCard(performer, side, rank = null, streak = null) {
-    const name = performer.name || `Performer #${performer.id}`;
-    const imagePath = performer.image_path || null;
-    const stashRating = performer.rating100 ? `${performer.rating100}/100` : "Unrated";
-    const rankDisplay = rank != null ? `<span class="hon-performer-rank hon-scene-rank">#${rank}</span>` : "";
-    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} wins</div>` : "";
-    return `
-    <div class="hon-performer-card hon-scene-card" data-performer-id="${performer.id}" data-side="${side}" data-rating="${performer.rating100 || 50}">
-      <div class="hon-performer-image-container hon-scene-image-container">
-        <a href="/performers/${performer.id}" target="_blank" class="hon-performer-link">
-          ${imagePath ? `<img class="hon-performer-image hon-scene-image" src="${imagePath}" alt="${name}" />` : `<div class="hon-no-image">No Image</div>`}
-        </a>
-        ${streakDisplay}
-      </div>
-      <div class="hon-performer-body hon-scene-body" data-winner="${performer.id}">
-        <div class="hon-performer-info hon-scene-info">
-          <div class="hon-performer-title-row hon-scene-title-row">
-            <h3 class="hon-performer-title hon-scene-title">${name}</h3>
-            ${rankDisplay}
-          </div>
-          <div class="hon-performer-meta hon-scene-meta">
-            <div class="hon-meta-item"><strong>Country:</strong> ${getCountryDisplay(performer.country)}</div>
-            <div class="hon-meta-item"><strong>Gender:</strong> ${getGenderDisplay(performer.gender)}</div>
-            <div class="hon-meta-item"><strong>Rating:</strong> ${stashRating}</div>
-          </div>
-        </div>
-        <div class="hon-choose-btn">\u2713 Choose This Performer</div>
-      </div>
-    </div>`;
-  }
-  function createImageCard(image, side, rank = null, streak = null) {
-    const thumbnailPath = image.paths?.thumbnail || null;
-    const rankDisplay = rank != null ? `<span class="hon-image-rank hon-scene-rank">#${rank}</span>` : "";
-    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak}</div>` : "";
-    return `
-    <div class="hon-image-card hon-scene-card" data-image-id="${image.id}" data-side="${side}" data-rating="${image.rating100 || 50}">
-      <div class="hon-image-image-container hon-scene-image-container" data-image-url="/images/${image.id}">
-        ${thumbnailPath ? `<img class="hon-scene-image" src="${thumbnailPath}" />` : `<div class="hon-no-image">No Image</div>`}
-        ${streakDisplay}
-        ${rankDisplay ? `<div class="hon-image-rank-overlay">${rankDisplay}</div>` : ""}
-      </div>
-      <div class="hon-image-body hon-scene-body" data-winner="${image.id}">
-        <div class="hon-choose-btn">\u2713 Choose This Image</div>
-      </div>
-    </div>`;
-  }
-  function createVictoryScreen(champion) {
-    let title, imagePath;
-    if (state.battleType === "performers") {
-      title = champion.name || `Performer #${champion.id}`;
-      imagePath = champion.image_path;
-    } else if (state.battleType === "images") {
-      title = `Image #${champion.id}`;
-      imagePath = champion.paths?.thumbnail || null;
-    } else {
-      const file = champion.files?.[0] || {};
-      title = champion.title || file.path?.split(/[/\\]/).pop().replace(/\.[^/.]+$/, "") || `Scene #${champion.id}`;
-      imagePath = champion.paths?.screenshot || null;
-    }
-    return `
-    <div class="hon-victory-screen">
-      <div class="hon-victory-crown">\u{1F451}</div>
-      <h2 class="hon-victory-title">CHAMPION!</h2>
-      <div class="hon-victory-scene">
-        ${imagePath ? `<img class="hon-victory-image" src="${imagePath}" alt="${title}" />` : `<div class="hon-victory-image hon-no-image">No Image</div>`}
-      </div>
-      <h3 class="hon-victory-name">${title}</h3>
-      <p class="hon-victory-stats">Conquered all ${state.totalItemsCount} with ${state.gauntletWins} wins!</p>
-      <button id="hon-new-gauntlet" class="btn btn-primary">Start New Gauntlet</button>
-    </div>
-  `;
-  }
-  var init_ui_cards = __esm({
-    "ui-cards.js"() {
-      init_state();
-      init_formatters();
-    }
-  });
-
   // parsers.js
   function parseUrlFilterCriteria() {
     try {
@@ -518,16 +365,6 @@
       return defaultValue;
     const parsed = parseInt(simpleValue, 10);
     return isNaN(parsed) ? defaultValue : parsed;
-  }
-  function normalizeGenderValue(value) {
-    if (!value || typeof value !== "string")
-      return value;
-    const normalized = value.toUpperCase().replace(/[\s-]+/g, "_");
-    const validGenders = /* @__PURE__ */ new Set(["MALE", "FEMALE", "TRANSGENDER_MALE", "TRANSGENDER_FEMALE", "INTERSEX", "NON_BINARY"]);
-    if (validGenders.has(normalized))
-      return normalized;
-    console.warn(`[HotOrNot] Invalid gender value "${value}"`);
-    return value;
   }
   function createNumericFilterObject(value, modifier, defaultModifier) {
     const filterObj = {
@@ -1088,156 +925,6 @@
     }
   });
 
-  // gauntlet-selection.js
-  var gauntlet_selection_exports = {};
-  __export(gauntlet_selection_exports, {
-    fetchPerformersForSelection: () => fetchPerformersForSelection,
-    loadPerformerSelection: () => loadPerformerSelection,
-    showPerformerSelection: () => showPerformerSelection,
-    showPlacementScreen: () => showPlacementScreen
-  });
-  async function fetchPerformersForSelection(count = 5) {
-    const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
-    const total = await fetchPerformerCount(filter);
-    const actualCount = Math.min(count, total);
-    const query = `query FindRandomPerformers($performer_filter: PerformerFilterType, $filter: FindFilterType) {
-    findPerformers(performer_filter: $performer_filter, filter: $filter) {
-      performers { ${PERFORMER_FRAGMENT} }
-    }
-  }`;
-    const result = await graphqlQuery(query, {
-      performer_filter: filter,
-      filter: { per_page: Math.min(100, total), sort: "random" }
-    });
-    return (result.findPerformers.performers || []).sort(() => Math.random() - 0.5).slice(0, actualCount);
-  }
-  function createSelectionCard(performer) {
-    const name = performer.name || `Performer #${performer.id}`;
-    const rating = performer.rating100 ? `${performer.rating100}/100` : "Unrated";
-    return `
-    <div class="hon-selection-card" data-performer-id="${performer.id}">
-      <div class="hon-selection-image-container">
-        ${performer.image_path ? `<img class="hon-selection-image" src="${performer.image_path}" alt="${name}" loading="lazy" />` : `<div class="hon-selection-image hon-no-image">No Image</div>`}
-      </div>
-      <div class="hon-selection-info">
-        <h4 class="hon-selection-name">${name}</h4>
-        <div class="hon-selection-rating">${rating}</div>
-      </div>
-    </div>`;
-  }
-  async function loadPerformerSelection() {
-    const listEl = document.getElementById("hon-performer-list");
-    if (!listEl)
-      return;
-    try {
-      const performers = await fetchPerformersForSelection(5);
-      listEl.innerHTML = performers.map((p) => createSelectionCard(p)).join("");
-      listEl.querySelectorAll(".hon-selection-card").forEach((card) => {
-        card.onclick = () => {
-          const selected = performers.find((p) => p.id.toString() === card.dataset.performerId);
-          if (selected)
-            startGauntletWithPerformer(selected);
-        };
-      });
-    } catch (err) {
-      listEl.innerHTML = `<div class="hon-error">Error: ${err.message}</div>`;
-    }
-  }
-  function startGauntletWithPerformer(performer) {
-    state.gauntletChampion = performer;
-    state.gauntletWins = 0;
-    state.gauntletDefeated = [];
-    state.gauntletFalling = false;
-    document.getElementById("hon-performer-selection").style.display = "none";
-    document.getElementById("hon-comparison-area").style.display = "";
-    document.querySelector(".hon-actions").style.display = "";
-    loadNewPair();
-  }
-  function showPerformerSelection() {
-    const selectionContainer = document.getElementById("hon-performer-selection");
-    const comparisonArea = document.getElementById("hon-comparison-area");
-    const actionsEl = document.querySelector(".hon-actions");
-    if (selectionContainer) {
-      selectionContainer.style.display = "block";
-      loadPerformerSelection();
-    }
-    if (comparisonArea)
-      comparisonArea.style.display = "none";
-    if (actionsEl)
-      actionsEl.style.display = "none";
-    const modal = document.getElementById("hon-modal");
-    if (modal) {
-      modal.classList.remove("hon-mode-champion", "hon-mode-swiss");
-      modal.classList.add("hon-mode-gauntlet");
-    }
-  }
-  function showPlacementScreen(item, rank, finalRating) {
-    const comparisonArea = document.getElementById("hon-comparison-area");
-    if (!comparisonArea)
-      return;
-    let title, imagePath;
-    if (state.battleType === "performers") {
-      title = item.name || `Performer #${item.id}`;
-      imagePath = item.image_path;
-    } else if (state.battleType === "images") {
-      title = `Image #${item.id}`;
-      imagePath = item.paths && item.paths.thumbnail ? item.paths.thumbnail : null;
-    } else {
-      const file = item.files && item.files[0] ? item.files[0] : {};
-      title = item.title;
-      if (!title && file.path) {
-        const pathParts = file.path.split(/[/\\]/);
-        title = pathParts[pathParts.length - 1].replace(/\.[^/.]+$/, "");
-      }
-      if (!title) {
-        title = `Scene #${item.id}`;
-      }
-      imagePath = item.paths ? item.paths.screenshot : null;
-    }
-    comparisonArea.innerHTML = `
-      <div class="hon-victory-screen">
-        <div class="hon-victory-crown">\u{1F4CD}</div>
-        <h2 class="hon-victory-title">PLACED!</h2>
-        <div class="hon-victory-scene">
-          ${imagePath ? `<img class="hon-victory-image" src="${imagePath}" alt="${title}" />` : `<div class="hon-victory-image hon-no-image">No Image</div>`}
-        </div>
-        <h3 class="hon-victory-name">${title}</h3>
-        <p class="hon-victory-stats">
-          Rank <strong>#${rank}</strong> of ${state.totalItemsCount}<br>
-          Rating: <strong>${finalRating}/100</strong>
-        </p>
-        <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
-      </div>
-    `;
-    const statusEl = document.getElementById("hon-gauntlet-status");
-    const actionsEl = document.querySelector(".hon-actions");
-    if (statusEl)
-      statusEl.style.display = "none";
-    if (actionsEl)
-      actionsEl.style.display = "none";
-    state.gauntletFalling = false;
-    state.gauntletFallingItem = null;
-    state.gauntletChampion = null;
-    state.gauntletWins = 0;
-    state.gauntletDefeated = [];
-    const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");
-    if (newBtn) {
-      newBtn.addEventListener("click", () => {
-        if (actionsEl)
-          actionsEl.style.display = "";
-        loadNewPair();
-      });
-    }
-  }
-  var init_gauntlet_selection = __esm({
-    "gauntlet-selection.js"() {
-      init_api_client();
-      init_parsers();
-      init_state();
-      init_battle_engine();
-    }
-  });
-
   // match-handler.js
   async function handleChooseItem(event) {
     if (state.disableChoice)
@@ -1266,7 +953,7 @@
           await updateItemRating(winnerId, finalRating, winnerItem, true);
           const finalRank = Math.max(1, (loserRank || 1) - 1);
           applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, { newWinnerRating: finalRating, newLoserRating: loserRating, winnerChange: 0, loserChange: 0 });
-          setTimeout(() => showPlacementScreen2(winnerItem, finalRank, finalRating, state.battleType, state.totalItemsCount), 800);
+          setTimeout(() => showPlacementScreen(winnerItem, finalRank, finalRating, state.battleType, state.totalItemsCount), 800);
         } else {
           state.gauntletDefeated.push(winnerId);
           await updateItemRating(state.gauntletFallingItem.id, loserRating, loserItem, false);
@@ -1393,7 +1080,7 @@
     if (!area)
       return;
     if (state.currentMode === "gauntlet" && state.battleType === "performers" && !state.gauntletChampion && !state.gauntletFalling) {
-      showPerformerSelection();
+      showPerformerSelection2();
       return;
     }
     try {
@@ -1404,7 +1091,7 @@
         return;
       }
       if (result.isPlacement) {
-        showPlacementScreen(result.items[0], result.placementRank, result.placementRating);
+        showPlacementScreen2(result.items[0], result.placementRank, result.placementRating);
         return;
       }
       const [left, right] = result.items;
@@ -1571,6 +1258,333 @@
       init_ui_manager();
       init_gauntlet_selection();
       init_match_handler();
+    }
+  });
+
+  // gauntlet-selection.js
+  var gauntlet_selection_exports = {};
+  __export(gauntlet_selection_exports, {
+    fetchPerformersForSelection: () => fetchPerformersForSelection,
+    initPlugin: () => initPlugin,
+    loadPerformerSelection: () => loadPerformerSelection,
+    showPerformerSelection: () => showPerformerSelection2,
+    showPlacementScreen: () => showPlacementScreen2
+  });
+  async function fetchPerformersForSelection(count = 5) {
+    const filter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
+    const total = await fetchPerformerCount(filter);
+    const actualCount = Math.min(count, total);
+    const query = `query FindRandomPerformers($performer_filter: PerformerFilterType, $filter: FindFilterType) {
+    findPerformers(performer_filter: $performer_filter, filter: $filter) {
+      performers { ${PERFORMER_FRAGMENT} }
+    }
+  }`;
+    const result = await graphqlQuery(query, {
+      performer_filter: filter,
+      filter: { per_page: Math.min(100, total), sort: "random" }
+    });
+    return (result.findPerformers.performers || []).sort(() => Math.random() - 0.5).slice(0, actualCount);
+  }
+  function createSelectionCard(performer) {
+    const name = performer.name || `Performer #${performer.id}`;
+    const rating = performer.rating100 ? `${performer.rating100}/100` : "Unrated";
+    return `
+    <div class="hon-selection-card" data-performer-id="${performer.id}">
+      <div class="hon-selection-image-container">
+        ${performer.image_path ? `<img class="hon-selection-image" src="${performer.image_path}" alt="${name}" loading="lazy" />` : `<div class="hon-selection-image hon-no-image">No Image</div>`}
+      </div>
+      <div class="hon-selection-info">
+        <h4 class="hon-selection-name">${name}</h4>
+        <div class="hon-selection-rating">${rating}</div>
+      </div>
+    </div>`;
+  }
+  function initPlugin() {
+    const performer = getCurrentPerformerFromPage2();
+    if (performer) {
+      startGauntletWithPerformer2(performer);
+    } else {
+      showPerformerSelection2();
+    }
+  }
+  function getCurrentPerformerFromPage2() {
+    const performerEl = document.querySelector(".performer-page[data-id]");
+    if (!performerEl)
+      return null;
+    return {
+      id: parseInt(performerEl.dataset.id, 10),
+      name: performerEl.dataset.name,
+      image_path: performerEl.dataset.image || null
+    };
+  }
+  async function loadPerformerSelection() {
+    const listEl = document.getElementById("hon-performer-list");
+    if (!listEl)
+      return;
+    try {
+      const performers = await fetchPerformersForSelection(5);
+      listEl.innerHTML = performers.map((p) => createSelectionCard(p)).join("");
+      listEl.querySelectorAll(".hon-selection-card").forEach((card) => {
+        card.onclick = () => {
+          const selected = performers.find((p) => p.id.toString() === card.dataset.performerId);
+          if (selected)
+            startGauntletWithPerformer2(selected);
+        };
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="hon-error">Error: ${err.message}</div>`;
+    }
+  }
+  function startGauntletWithPerformer2(performer) {
+    state.gauntletChampion = performer;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
+    state.gauntletFalling = false;
+    const performerFilter = {
+      id: performer.id
+      // assuming performer objects have unique IDs
+    };
+    state.currentFilter = performerFilter;
+    document.getElementById("hon-performer-selection").style.display = "none";
+    document.getElementById("hon-comparison-area").style.display = "";
+    document.querySelector(".hon-actions").style.display = "";
+    loadNewPair(performerFilter);
+  }
+  function showPerformerSelection2() {
+    const selectionContainer = document.getElementById("hon-performer-selection");
+    const comparisonArea = document.getElementById("hon-comparison-area");
+    const actionsEl = document.querySelector(".hon-actions");
+    if (selectionContainer) {
+      selectionContainer.style.display = "block";
+      loadPerformerSelection();
+    }
+    if (comparisonArea)
+      comparisonArea.style.display = "none";
+    if (actionsEl)
+      actionsEl.style.display = "none";
+    const modal = document.getElementById("hon-modal");
+    if (modal) {
+      modal.classList.remove("hon-mode-champion", "hon-mode-swiss");
+      modal.classList.add("hon-mode-gauntlet");
+    }
+  }
+  function showPlacementScreen2(item, rank, finalRating) {
+    const comparisonArea = document.getElementById("hon-comparison-area");
+    if (!comparisonArea)
+      return;
+    let title, imagePath;
+    if (state.battleType === "performers") {
+      title = item.name || `Performer #${item.id}`;
+      imagePath = item.image_path;
+    } else if (state.battleType === "images") {
+      title = `Image #${item.id}`;
+      imagePath = item.paths && item.paths.thumbnail ? item.paths.thumbnail : null;
+    } else {
+      const file = item.files && item.files[0] ? item.files[0] : {};
+      title = item.title;
+      if (!title && file.path) {
+        const pathParts = file.path.split(/[/\\]/);
+        title = pathParts[pathParts.length - 1].replace(/\.[^/.]+$/, "");
+      }
+      if (!title) {
+        title = `Scene #${item.id}`;
+      }
+      imagePath = item.paths ? item.paths.screenshot : null;
+    }
+    comparisonArea.innerHTML = `
+      <div class="hon-victory-screen">
+        <div class="hon-victory-crown">\u{1F4CD}</div>
+        <h2 class="hon-victory-title">PLACED!</h2>
+        <div class="hon-victory-scene">
+          ${imagePath ? `<img class="hon-victory-image" src="${imagePath}" alt="${title}" />` : `<div class="hon-victory-image hon-no-image">No Image</div>`}
+        </div>
+        <h3 class="hon-victory-name">${title}</h3>
+        <p class="hon-victory-stats">
+          Rank <strong>#${rank}</strong> of ${state.totalItemsCount}<br>
+          Rating: <strong>${finalRating}/100</strong>
+        </p>
+        <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
+      </div>
+    `;
+    const statusEl = document.getElementById("hon-gauntlet-status");
+    const actionsEl = document.querySelector(".hon-actions");
+    if (statusEl)
+      statusEl.style.display = "none";
+    if (actionsEl)
+      actionsEl.style.display = "none";
+    state.gauntletFalling = false;
+    state.gauntletFallingItem = null;
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
+    const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");
+    if (newBtn) {
+      newBtn.addEventListener("click", () => {
+        if (actionsEl)
+          actionsEl.style.display = "";
+        loadNewPair();
+      });
+    }
+  }
+  var init_gauntlet_selection = __esm({
+    "gauntlet-selection.js"() {
+      init_api_client();
+      init_parsers();
+      init_state();
+      init_battle_engine();
+    }
+  });
+
+  // formatters.js
+  function getGenderDisplay(gender) {
+    if (!gender)
+      return "";
+    return (ALL_GENDERS.find((g) => g.value === gender) || { label: gender }).label;
+  }
+  function formatDuration(seconds) {
+    if (!seconds)
+      return "N/A";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    const s = Math.floor(seconds % 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${m}:${s.toString().padStart(2, "0")}`;
+  }
+  function escapeHtml(unsafe) {
+    if (!unsafe)
+      return "";
+    return String(unsafe).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+  function getCountryDisplay(countryCode) {
+    if (!countryCode)
+      return "";
+    const code = countryCode.toUpperCase().trim();
+    const name = COUNTRY_NAMES[code] || escapeHtml(code);
+    const flagClass = `fi fi-${code.toLowerCase().replace(/[^a-z]/g, "")}`;
+    return `<span class="${flagClass}"></span> ${name}`;
+  }
+  var init_formatters = __esm({
+    "formatters.js"() {
+      init_constants();
+    }
+  });
+
+  // ui-cards.js
+  function renderCard(item, side, rank) {
+    const streak = state.gauntletChampion?.id === item.id ? state.gauntletWins : null;
+    if (state.battleType === "performers")
+      return createPerformerCard(item, side, rank, streak);
+    if (state.battleType === "images")
+      return createImageCard(item, side, rank, streak);
+    return createSceneCard(item, side, rank, streak);
+  }
+  function createSceneCard(scene, side, rank = null, streak = null) {
+    const file = scene.files?.[0] || {};
+    const performers = scene.performers?.map((p) => p.name).join(", ") || "No performers";
+    const studio = scene.studio?.name || "No studio";
+    const title = scene.title || file.path?.split(/[/\\]/).pop().replace(/\.[^/.]+$/, "") || `Scene #${scene.id}`;
+    const screenshotPath = scene.paths?.screenshot;
+    const previewPath = scene.paths?.preview;
+    const stashRating = scene.rating100 ? `${scene.rating100}/100` : "Unrated";
+    const rankDisplay = rank != null ? `<span class="hon-scene-rank">${typeof rank === "number" ? "#" + rank : rank}</span>` : "";
+    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} win${streak > 1 ? "s" : ""}</div>` : "";
+    return `
+    <div class="hon-scene-card" data-scene-id="${scene.id}" data-side="${side}" data-rating="${scene.rating100 || 50}">
+      <div class="hon-scene-image-container" data-scene-url="/scenes/${scene.id}">
+        ${screenshotPath ? `<img class="hon-scene-image" src="${screenshotPath}" alt="${title}" loading="lazy" />` : `<div class="hon-scene-image hon-no-image">No Screenshot</div>`}
+        ${previewPath ? `<video class="hon-hover-preview" src="${previewPath}" loop playsinline></video>` : ""}
+        <div class="hon-scene-duration">${formatDuration(file.duration)}</div>
+        ${streakDisplay}
+        <div class="hon-click-hint">Click to open scene</div>
+      </div>
+      <div class="hon-scene-body" data-winner="${scene.id}">
+        <div class="hon-scene-info">
+          <div class="hon-scene-title-row"><h3 class="hon-scene-title">${title}</h3>${rankDisplay}</div>
+          <div class="hon-scene-meta">
+            <div class="hon-meta-item"><strong>Studio:</strong> ${studio}</div>
+            <div class="hon-meta-item"><strong>Performers:</strong> ${performers}</div>
+            <div class="hon-meta-item"><strong>Rating:</strong> ${stashRating}</div>
+          </div>
+        </div>
+        <div class="hon-choose-btn">\u2713 Choose This Scene</div>
+      </div>
+    </div>`;
+  }
+  function createPerformerCard(performer, side, rank = null, streak = null) {
+    const name = performer.name || `Performer #${performer.id}`;
+    const imagePath = performer.image_path || null;
+    const stashRating = performer.rating100 ? `${performer.rating100}/100` : "Unrated";
+    const rankDisplay = rank != null ? `<span class="hon-performer-rank hon-scene-rank">#${rank}</span>` : "";
+    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} wins</div>` : "";
+    return `
+    <div class="hon-performer-card hon-scene-card" data-performer-id="${performer.id}" data-side="${side}" data-rating="${performer.rating100 || 50}">
+      <div class="hon-performer-image-container hon-scene-image-container">
+        <a href="/performers/${performer.id}" target="_blank" class="hon-performer-link">
+          ${imagePath ? `<img class="hon-performer-image hon-scene-image" src="${imagePath}" alt="${name}" />` : `<div class="hon-no-image">No Image</div>`}
+        </a>
+        ${streakDisplay}
+      </div>
+      <div class="hon-performer-body hon-scene-body" data-winner="${performer.id}">
+        <div class="hon-performer-info hon-scene-info">
+          <div class="hon-performer-title-row hon-scene-title-row">
+            <h3 class="hon-performer-title hon-scene-title">${name}</h3>
+            ${rankDisplay}
+          </div>
+          <div class="hon-performer-meta hon-scene-meta">
+            <div class="hon-meta-item"><strong>Country:</strong> ${getCountryDisplay(performer.country)}</div>
+            <div class="hon-meta-item"><strong>Gender:</strong> ${getGenderDisplay(performer.gender)}</div>
+            <div class="hon-meta-item"><strong>Rating:</strong> ${stashRating}</div>
+          </div>
+        </div>
+        <div class="hon-choose-btn">\u2713 Choose This Performer</div>
+      </div>
+    </div>`;
+  }
+  function createImageCard(image, side, rank = null, streak = null) {
+    const thumbnailPath = image.paths?.thumbnail || null;
+    const rankDisplay = rank != null ? `<span class="hon-image-rank hon-scene-rank">#${rank}</span>` : "";
+    const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak}</div>` : "";
+    return `
+    <div class="hon-image-card hon-scene-card" data-image-id="${image.id}" data-side="${side}" data-rating="${image.rating100 || 50}">
+      <div class="hon-image-image-container hon-scene-image-container" data-image-url="/images/${image.id}">
+        ${thumbnailPath ? `<img class="hon-scene-image" src="${thumbnailPath}" />` : `<div class="hon-no-image">No Image</div>`}
+        ${streakDisplay}
+        ${rankDisplay ? `<div class="hon-image-rank-overlay">${rankDisplay}</div>` : ""}
+      </div>
+      <div class="hon-image-body hon-scene-body" data-winner="${image.id}">
+        <div class="hon-choose-btn">\u2713 Choose This Image</div>
+      </div>
+    </div>`;
+  }
+  function createVictoryScreen(champion) {
+    let title, imagePath;
+    if (state.battleType === "performers") {
+      title = champion.name || `Performer #${champion.id}`;
+      imagePath = champion.image_path;
+    } else if (state.battleType === "images") {
+      title = `Image #${champion.id}`;
+      imagePath = champion.paths?.thumbnail || null;
+    } else {
+      const file = champion.files?.[0] || {};
+      title = champion.title || file.path?.split(/[/\\]/).pop().replace(/\.[^/.]+$/, "") || `Scene #${champion.id}`;
+      imagePath = champion.paths?.screenshot || null;
+    }
+    return `
+    <div class="hon-victory-screen">
+      <div class="hon-victory-crown">\u{1F451}</div>
+      <h2 class="hon-victory-title">CHAMPION!</h2>
+      <div class="hon-victory-scene">
+        ${imagePath ? `<img class="hon-victory-image" src="${imagePath}" alt="${title}" />` : `<div class="hon-victory-image hon-no-image">No Image</div>`}
+      </div>
+      <h3 class="hon-victory-name">${title}</h3>
+      <p class="hon-victory-stats">Conquered all ${state.totalItemsCount} with ${state.gauntletWins} wins!</p>
+      <button id="hon-new-gauntlet" class="btn btn-primary">Start New Gauntlet</button>
+    </div>
+  `;
+  }
+  var init_ui_cards = __esm({
+    "ui-cards.js"() {
+      init_state();
+      init_formatters();
     }
   });
 
@@ -1790,24 +1804,60 @@
   __export(ui_modal_exports, {
     addFloatingButton: () => addFloatingButton,
     closeRankingModal: () => closeRankingModal,
+    getPerformerIdFromUrl: () => getPerformerIdFromUrl,
+    isOnSinglePerformerPage: () => isOnSinglePerformerPage,
     openRankingModal: () => openRankingModal,
     shouldShowButton: () => shouldShowButton
   });
+  function getPerformerIdFromUrl() {
+    const match = window.location.pathname.match(/^\/performers\/(\d+)(?:\/|$)/);
+    return match ? match[1] : null;
+  }
+  function isOnSinglePerformerPage() {
+    return getPerformerIdFromUrl() !== null;
+  }
   function shouldShowButton() {
     const path = window.location.pathname;
-    return /^\/performers/.test(path) || /^\/images/.test(path);
+    if (path === "/performers" || path === "/performers/")
+      return true;
+    if (path === "/images" || path === "/images/")
+      return true;
+    return /^\/performers\/\d+(?:\/|$)/.test(path);
   }
   function addFloatingButton() {
-    if (document.getElementById("hon-floating-btn"))
+    const buttonId = "plugin_hon";
+    const existing = document.getElementById(buttonId);
+    if (!shouldShowButton()) {
+      if (existing)
+        existing.closest(".col-4")?.remove();
       return;
-    if (!shouldShowButton())
+    }
+    if (existing)
       return;
-    const btn = document.createElement("button");
-    btn.id = "hon-floating-btn";
-    btn.innerHTML = "\u{1F525}";
-    btn.onclick = () => window.openRankingModal();
-    btn.setAttribute("onclick", "window.openRankingModal()");
-    document.body.appendChild(btn);
+    const buttonContainer = document.createElement("div");
+    buttonContainer.className = "col-4 col-sm-3 col-md-2 col-lg-auto nav-link";
+    buttonContainer.innerHTML = `
+    <a href="javascript:void(0);" id="${buttonId}" class="minimal p-4 p-xl-2 d-flex d-xl-inline-block flex-column justify-content-between align-items-center btn btn-primary" title="HotOrNot">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" class="plugin_hon__flame">
+        <path d="M8 0c-.2 3.5-2 5-3 6-1 1-1 3-1 4s1 3 3 3 4-1 4-3c0-2-2-3-2-5 0-1 1-2 1-2S9.5 0 8 0z"/>
+      </svg>
+      <span>HotOrNot</span>
+    </a>
+  `;
+    const button = buttonContainer.querySelector(`#${buttonId}`);
+    button.addEventListener("click", openRankingModal);
+    const navTarget2 = document.querySelector(".navbar-nav");
+    if (navTarget2)
+      navTarget2.appendChild(buttonContainer);
+  }
+  function watchForNavigation() {
+    const observer2 = new MutationObserver(() => {
+      addFloatingButton();
+    });
+    observer2.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
   }
   function handleGlobalKeys(e) {
     const activeModal = document.getElementById("hon-modal");
@@ -1911,11 +1961,24 @@
       statsModal.remove();
     document.removeEventListener("keydown", handleGlobalKeys);
   }
+  var navTarget;
   var init_ui_modal = __esm({
     "ui-modal.js"() {
       init_state();
       init_battle_engine();
       init_ui_dashboard();
+      watchForNavigation();
+      addFloatingButton();
+      navTarget = document.querySelector(".navbar-nav");
+      if (navTarget) {
+        const observer2 = new MutationObserver(() => {
+          addFloatingButton();
+        });
+        observer2.observe(navTarget, { childList: true, subtree: true });
+      }
+      ["popstate"].forEach(
+        (event) => window.addEventListener(event, addFloatingButton)
+      );
     }
   });
 
@@ -1935,6 +1998,7 @@
           <span class="hon-mode-title">${MODE_CONFIG[mode].label}</span>
         </button>`).join("")}
     </div>` : "";
+    state.selectedGenders = ["FEMALE"];
     const genderFilterHTML = isPerformers ? `
     <div class="hon-gender-filter">
       <div class="hon-gender-btns">
@@ -2041,7 +2105,7 @@
   });
 
   // ui-badge.js
-  function isOnSinglePerformerPage() {
+  function isOnSinglePerformerPage2() {
     return window.location.pathname.includes("/performers/") && !window.location.pathname.endsWith("/performers");
   }
   function createBattleRankBadge(rank, total, rating, stats = null) {
@@ -2142,7 +2206,7 @@ Match Stats:`;
       }
     }, 200);
   }
-  function showPlacementScreen2(item, rank, finalRating, battleType, totalItemsCount) {
+  function showPlacementScreen(item, rank, finalRating, battleType, totalItemsCount) {
     const area = document.getElementById("hon-comparison-area");
     if (!area)
       return;
@@ -2226,13 +2290,18 @@ Match Stats:`;
   });
 
   // ui-manager.js
+  function onPluginOpen() {
+    initPlugin();
+  }
   var init_ui_manager = __esm({
     "ui-manager.js"() {
+      init_gauntlet_selection();
       init_ui_cards();
       init_ui_dashboard();
       init_ui_modal();
       init_ui_stats();
       init_ui_badge();
+      document.getElementById("plugin_hon")?.addEventListener("click", onPluginOpen);
     }
   });
 
@@ -2248,7 +2317,7 @@ Match Stats:`;
   window.openStatsModal = openStatsModal;
   window.closeRankingModal = closeRankingModal;
   window.handleGenderToggle = handleGenderToggle;
-  window.showPerformerSelection = showPerformerSelection;
+  window.showPerformerSelection = showPerformerSelection2;
   window.handleChooseItem = handleChooseItem;
   var lastPath = "";
   var observer = new MutationObserver(() => {
@@ -2261,7 +2330,7 @@ Match Stats:`;
     } else if (shouldShowButton()) {
       addFloatingButton();
     }
-    if (isOnSinglePerformerPage()) {
+    if (isOnSinglePerformerPage2()) {
       const badgeExists = !!document.getElementById("hon-battle-rank-badge");
       if (currentPath !== lastPath || !badgeExists) {
         lastPath = currentPath;
@@ -2287,7 +2356,7 @@ Match Stats:`;
       childList: true,
       subtree: true
     });
-    if (isOnSinglePerformerPage()) {
+    if (isOnSinglePerformerPage2()) {
       setTimeout(() => injectBattleRankBadge(), 1e3);
     }
     if (typeof PluginApi !== "undefined" && PluginApi.Event?.addEventListener) {

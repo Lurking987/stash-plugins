@@ -8,22 +8,72 @@ import { createMainUI, attachEventListeners } from './ui-dashboard.js';
  * ============================================
  */
 
+export function getPerformerIdFromUrl() {
+  const match = window.location.pathname.match(/^\/performers\/(\d+)(?:\/|$)/);
+  return match ? match[1] : null;
+}
+
+export function isOnSinglePerformerPage() {
+  return getPerformerIdFromUrl() !== null;
+}
+
 export function shouldShowButton() {
   const path = window.location.pathname;
-  return /^\/performers/.test(path) || /^\/images/.test(path);
+
+  if (path === "/performers" || path === "/performers/") return true;
+  if (path === "/images" || path === "/images/") return true;
+
+  return /^\/performers\/\d+(?:\/|$)/.test(path);
 }
 
 export function addFloatingButton() {
-  if (document.getElementById("hon-floating-btn")) return;
-  if (!shouldShowButton()) return;
+  const buttonId = "plugin_hon";
+  const existing = document.getElementById(buttonId);
 
-  const btn = document.createElement("button");
-  btn.id = "hon-floating-btn";
-  btn.innerHTML = "🔥";
-  btn.onclick = () => window.openRankingModal();
-  btn.setAttribute("onclick", "window.openRankingModal()");
-  document.body.appendChild(btn);
+  // Remove if not needed
+  if (!shouldShowButton()) {
+    if (existing) existing.closest(".col-4")?.remove();
+    return;
+  }
+
+  // Prevent duplicates
+  if (existing) return;
+
+  // Outer container matches other buttons
+  const buttonContainer = document.createElement("div");
+  buttonContainer.className = "col-4 col-sm-3 col-md-2 col-lg-auto nav-link";
+
+  // Inner button styled like others
+  buttonContainer.innerHTML = `
+    <a href="javascript:void(0);" id="${buttonId}" class="minimal p-4 p-xl-2 d-flex d-xl-inline-block flex-column justify-content-between align-items-center btn btn-primary" title="HotOrNot">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" class="plugin_hon__flame">
+        <path d="M8 0c-.2 3.5-2 5-3 6-1 1-1 3-1 4s1 3 3 3 4-1 4-3c0-2-2-3-2-5 0-1 1-2 1-2S9.5 0 8 0z"/>
+      </svg>
+      <span>HotOrNot</span>
+    </a>
+  `;
+
+  // Add click behavior
+  const button = buttonContainer.querySelector(`#${buttonId}`);
+  button.addEventListener("click", openRankingModal);
+
+  // Append to navbar
+  const navTarget = document.querySelector(".navbar-nav");
+  if (navTarget) navTarget.appendChild(buttonContainer);
 }
+
+function watchForNavigation() {
+  const observer = new MutationObserver(() => {
+    addFloatingButton();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+watchForNavigation();
 
 // Declared outside so closeRankingModal can remove the same reference
 function handleGlobalKeys(e) {
@@ -138,3 +188,19 @@ export function closeRankingModal() {
 
   document.removeEventListener("keydown", handleGlobalKeys);
 }
+
+addFloatingButton(); // initial render
+
+const navTarget = document.querySelector(".navbar-nav");
+if (navTarget) {
+  const observer = new MutationObserver(() => {
+    addFloatingButton();
+  });
+
+  observer.observe(navTarget, { childList: true, subtree: true });
+}
+
+// Optional: handle SPA navigation
+["popstate"].forEach(event =>
+  window.addEventListener(event, addFloatingButton)
+  );
