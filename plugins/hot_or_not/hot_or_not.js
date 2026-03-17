@@ -1152,19 +1152,13 @@
     }
   }
   function startGauntletWithPerformer(performer) {
-    resetBattleState();
     state.gauntletChampion = performer;
     state.gauntletWins = 0;
+    state.gauntletDefeated = [];
     state.gauntletFalling = false;
-    const sel = document.getElementById("hon-performer-selection");
-    const comp = document.getElementById("hon-comparison-area");
-    const actions = document.querySelector(".hon-actions");
-    if (sel)
-      sel.style.display = "none";
-    if (comp)
-      comp.style.display = "";
-    if (actions)
-      actions.style.display = "";
+    document.getElementById("hon-performer-selection").style.display = "none";
+    document.getElementById("hon-comparison-area").style.display = "";
+    document.querySelector(".hon-actions").style.display = "";
     loadNewPair();
   }
   function showPerformerSelection() {
@@ -1229,7 +1223,11 @@
       statusEl.style.display = "none";
     if (actionsEl)
       actionsEl.style.display = "none";
-    resetBattleState();
+    state.gauntletFalling = false;
+    state.gauntletFallingItem = null;
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
     const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");
     if (newBtn) {
       newBtn.addEventListener("click", () => {
@@ -1304,8 +1302,7 @@
       state.gauntletWins++;
       state.gauntletChampion.rating100 = newWinnerRating;
     } else {
-      if (!state.gauntletFalling) {
-        console.log(`[HotOrNot] Champion ${loserItem.name} defeated. Entering placement phase.`);
+      if (state.gauntletChampion) {
         state.gauntletFalling = true;
         state.gauntletFallingItem = loserItem;
         state.gauntletDefeated = [winnerId];
@@ -1556,33 +1553,26 @@
     return fetchGauntletPairPerformers();
   }
   function handleMatchmakingLogic(list, type) {
+    if (state.gauntletFalling && state.gauntletFallingItem) {
+      const fallIdx = list.findIndex((i) => i.id === state.gauntletFallingItem.id);
+      const below = list.filter((i, idx) => idx > fallIdx && !state.gauntletDefeated.includes(i.id));
+      if (below.length === 0) {
+        return { items: [state.gauntletFallingItem], ranks: [list.length], isVictory: false, isPlacement: true, placementRank: list.length, placementRating: 1 };
+      }
+      const nextBelow = below[0];
+      return { items: [state.gauntletFallingItem, nextBelow], ranks: [fallIdx + 1, list.indexOf(nextBelow) + 1], isFalling: true };
+    }
     if (!state.gauntletChampion) {
-      console.warn("[HotOrNot] No champion selected, picking a random starter.");
-      const randomStarter = list[Math.floor(Math.random() * list.length)];
-      return { items: [randomStarter, list.find((i) => i.id !== randomStarter.id)], ranks: [null, null], isVictory: false };
+      const challenger = list[Math.floor(Math.random() * list.length)];
+      const lowest = [...list].sort((a, b) => (a.rating100 || 0) - (b.rating100 || 0))[0];
+      return { items: [challenger, lowest], ranks: [list.indexOf(challenger) + 1, list.indexOf(lowest) + 1], isVictory: false };
     }
     const champIdx = list.findIndex((i) => i.id === state.gauntletChampion.id);
-    let potentialOpponents = list.filter(
-      (item, idx) => idx < champIdx && !state.gauntletDefeated.includes(item.id) && item.id !== state.skippedId
-    );
-    if (potentialOpponents.length === 0) {
-      if (state.skippedId) {
-        state.skippedId = null;
-        return handleMatchmakingLogic(list, type);
-      }
+    const opponents = list.filter((i, idx) => i.id !== state.gauntletChampion.id && !state.gauntletDefeated.includes(i.id) && (idx < champIdx || (i.rating100 || 0) >= (state.gauntletChampion.rating100 || 0)));
+    if (opponents.length === 0)
       return { items: [state.gauntletChampion], ranks: [1], isVictory: true };
-    }
-    const proximityWindow = Math.min(5, potentialOpponents.length);
-    const randomIdx = Math.floor(Math.random() * proximityWindow);
-    const nextOpponent = potentialOpponents[potentialOpponents.length - 1 - randomIdx];
-    return {
-      items: [state.gauntletChampion, nextOpponent],
-      ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1],
-      isVictory: false
-    };
-  }
-  function isChampionVictory(currentIndex, defeatedList, totalList) {
-    return totalList.filter((item, idx) => idx < currentIndex && !defeatedList.includes(item.id)).length === 0;
+    const nextOpponent = opponents[opponents.length - 1];
+    return { items: [state.gauntletChampion, nextOpponent], ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1], isVictory: false };
   }
   var init_battle_engine = __esm({
     "battle-engine.js"() {
@@ -1812,67 +1802,24 @@
   __export(ui_modal_exports, {
     addFloatingButton: () => addFloatingButton,
     closeRankingModal: () => closeRankingModal,
-    getPerformerIdFromUrl: () => getPerformerIdFromUrl,
-    isOnSinglePerformerPage: () => isOnSinglePerformerPage,
     openRankingModal: () => openRankingModal,
     shouldShowButton: () => shouldShowButton
   });
-  function getPerformerIdFromUrl() {
-    const match = window.location.pathname.match(/^\/performers\/(\d+)(?:\/|$)/);
-    return match ? match[1] : null;
-  }
-  function isOnSinglePerformerPage() {
-    return getPerformerIdFromUrl() !== null;
-  }
   function shouldShowButton() {
     const path = window.location.pathname;
-    if (path === "/performers" || path === "/performers/")
-      return true;
-    if (path === "/images" || path === "/images/")
-      return true;
-    return /^\/performers\/\d+(?:\/|$)/.test(path);
+    return /^\/performers/.test(path) || /^\/images/.test(path);
   }
   function addFloatingButton() {
-    const buttonId = "plugin_hon";
-    const existing = document.getElementById(buttonId);
-    if (!shouldShowButton()) {
-      if (existing)
-        existing.closest(".col-4")?.remove();
+    if (document.getElementById("hon-floating-btn"))
       return;
-    }
-    if (existing)
+    if (!shouldShowButton())
       return;
-    const buttonContainer = document.createElement("div");
-    buttonContainer.className = "col-4 col-sm-3 col-md-2 col-lg-auto nav-link";
-    buttonContainer.innerHTML = `
-    <a href="javascript:void(0);" id="${buttonId}" class="minimal p-4 p-xl-2 d-flex d-xl-inline-block flex-column justify-content-between align-items-center btn btn-primary" title="HotOrNot">
-      <svg 
-        xmlns="http://www.w3.org/2000/svg" 
-        viewBox="0 0 16 16" 
-        class="plugin_hon__flame svg-inline--fa fa-icon nav-menu-icon d-block d-xl-inline mb-2 mb-xl-0" 
-        fill="currentColor"
-        aria-hidden="true" 
-        focusable="false" 
-        role="img">
-        <path d="M8 0c-.2 3.5-2 5-3 6-1 1-1 3-1 4s1 3 3 3 4-1 4-3c0-2-2-3-2-5 0-1 1-2 1-2S9.5 0 8 0z"/>
-      </svg>
-      <span>HotOrNot</span>
-    </a>
-  `;
-    const button = buttonContainer.querySelector(`#${buttonId}`);
-    button.addEventListener("click", openRankingModal);
-    const navTarget2 = document.querySelector(".navbar-nav");
-    if (navTarget2)
-      navTarget2.appendChild(buttonContainer);
-  }
-  function watchForNavigation() {
-    const observer2 = new MutationObserver(() => {
-      addFloatingButton();
-    });
-    observer2.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+    const btn = document.createElement("button");
+    btn.id = "hon-floating-btn";
+    btn.innerHTML = "\u{1F525}";
+    btn.onclick = () => window.openRankingModal();
+    btn.setAttribute("onclick", "window.openRankingModal()");
+    document.body.appendChild(btn);
   }
   function handleGlobalKeys(e) {
     const activeModal = document.getElementById("hon-modal");
@@ -1984,24 +1931,11 @@
       statsModal.remove();
     document.removeEventListener("keydown", handleGlobalKeys);
   }
-  var navTarget;
   var init_ui_modal = __esm({
     "ui-modal.js"() {
       init_state();
       init_battle_engine();
       init_ui_dashboard();
-      watchForNavigation();
-      addFloatingButton();
-      navTarget = document.querySelector(".navbar-nav");
-      if (navTarget) {
-        const observer2 = new MutationObserver(() => {
-          addFloatingButton();
-        });
-        observer2.observe(navTarget, { childList: true, subtree: true });
-      }
-      ["popstate"].forEach(
-        (event) => window.addEventListener(event, addFloatingButton)
-      );
     }
   });
 
@@ -2144,7 +2078,7 @@
   });
 
   // ui-badge.js
-  function isOnSinglePerformerPage2() {
+  function isOnSinglePerformerPage() {
     return window.location.pathname.includes("/performers/") && !window.location.pathname.endsWith("/performers");
   }
   function createBattleRankBadge(rank, total, rating, stats = null) {
@@ -2364,7 +2298,7 @@ Match Stats:`;
     } else if (shouldShowButton()) {
       addFloatingButton();
     }
-    if (isOnSinglePerformerPage2()) {
+    if (isOnSinglePerformerPage()) {
       const badgeExists = !!document.getElementById("hon-battle-rank-badge");
       if (currentPath !== lastPath || !badgeExists) {
         lastPath = currentPath;
@@ -2390,7 +2324,7 @@ Match Stats:`;
       childList: true,
       subtree: true
     });
-    if (isOnSinglePerformerPage2()) {
+    if (isOnSinglePerformerPage()) {
       setTimeout(() => injectBattleRankBadge(), 1e3);
     }
     if (typeof PluginApi !== "undefined" && PluginApi.Event?.addEventListener) {

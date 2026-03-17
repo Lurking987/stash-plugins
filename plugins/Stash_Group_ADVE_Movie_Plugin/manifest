@@ -1,0 +1,14 @@
+id: Stash_Group_ADVE_Movie_Plugin
+name: Stash Group ADVE Movie Plugin
+metadata:
+  description: Compares scenes in a Stash Group against AdultDVDEmpire. Requires an ADVE URL in the Group's URL list.
+version: 0.3.0
+date: "2026-03-11 03:39:09"
+requires: []
+source_repository: https://lurking987.github.io/stash-plugins/main/index.yml
+files:
+- Stash_Group_ADVE_Movie_Plugin.yml
+- manifest
+- README.md
+- panel.js
+- checker.py

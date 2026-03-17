@@ -1,0 +1,28 @@
+name: "Stash Group ADVE Movie Checker"
+description: "Compares scenes in a Stash Group against AdultDVDEmpire. Requires an ADVE URL in the Group's URL list."
+version: "0.3.0"
+
+ui:
+  javascript:
+    - panel.js
+  assets:
+    /results: results
+  csp:
+    connect-src:
+      - https://adultdvdempire.com
+      - https://www.adultdvdempire.com
+
+tasks:
+  - name: "Check Group Scenes"
+    description: "Scrapes ADVE for a single Group (triggered by the UI panel)."
+    defaultArgs:
+      mode: check_group
+
+  - name: "Scrape ADVE Scenes for All Groups"
+    description: "Scrapes ADVE scene data for every Group that has an ADVE URL."
+    defaultArgs:
+      mode: scrape_all
+
+exec:
+  - python3
+  - "{pluginDir}/checker.py"
