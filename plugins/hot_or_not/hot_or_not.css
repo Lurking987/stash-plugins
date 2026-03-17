@@ -743,8 +743,19 @@
 .hon-performer-list {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 15px;
+  gap: 40px;
   width: 100%;
+  padding: 12px 6px;
+}
+.hon-performer-list .hon-selection-card {
+  transform: scale(1.25);
+  transform-origin: center center;
+}
+.hon-performer-list .hon-selection-name {
+  font-size: 0.95rem;
+}
+.hon-performer-list .hon-selection-rating {
+  font-size: 0.85rem;
 }
 .hon-selection-card {
   background: #252525;
@@ -1402,13 +1413,17 @@
 #hon-performer-list {
   display: grid !important;
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-  gap: 15px;
+  gap: 40px !important;
   width: 100%;
+  padding: 12px 6px;
 }
 #hon-performer-list img {
-  height: 150px !important;
   width: 100%;
   object-fit: cover;
+}
+#hon-performer-list .hon-selection-card {
+  transform: scale(1.25) !important;
+  transform-origin: center center !important;
 }
 .quality-group {
   display: flex;
