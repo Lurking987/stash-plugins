@@ -10,6 +10,14 @@
   };
 
   // state.js
+  function resetBattleState() {
+    state.gauntletChampion = null;
+    state.gauntletWins = 0;
+    state.gauntletDefeated = [];
+    state.gauntletFalling = false;
+    state.gauntletFallingItem = null;
+    state.gauntletChampionRank = 0;
+  }
   var state;
   var init_state = __esm({
     "state.js"() {
@@ -1298,10 +1306,9 @@
         state.gauntletFalling = true;
         state.gauntletFallingItem = loserItem;
         state.gauntletDefeated = [winnerId];
+      } else {
+        state.gauntletDefeated.push(winnerId);
       }
-      state.gauntletChampion = winnerItem;
-      state.gauntletWins = 1;
-      state.gauntletDefeated = [loserId];
     }
   }
   function updateChampionModeState(winnerId, winnerItem, loserId, newWinnerRating) {
@@ -1316,31 +1323,15 @@
     }
   }
   async function handleSkip() {
-    const leftPerformer = state.currentPair?.left;
     const rightPerformer = state.currentPair?.right;
-    if (!leftPerformer || !rightPerformer) {
-      loadNewPair();
-      return;
+    if (state.currentMode === "gauntlet" && rightPerformer) {
+      state.skippedId = rightPerformer.id;
+      console.log(`[HotOrNot] Skipping Gauntlet opponent: ${rightPerformer.name}`);
     }
     if (state.currentMode === "swiss") {
-      console.log(`[HotOrNot] Tying Swiss match: ${leftPerformer.name} vs ${rightPerformer.name}`);
-      try {
-        await handleComparison(
-          leftPerformer.id,
-          rightPerformer.id,
-          leftPerformer.rating100,
-          rightPerformer.rating100,
-          null,
-          leftPerformer,
-          rightPerformer,
-          true
-          // <--- The isDraw flag
-        );
-      } catch (err) {
-        console.error("[HotOrNot] Tie failed:", err);
-      }
     }
-    loadNewPair();
+    const { loadNewPair: loadNewPair2 } = await Promise.resolve().then(() => (init_battle_engine(), battle_engine_exports));
+    loadNewPair2();
   }
   function applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome) {
     winnerCard.classList.add("hon-winner");
@@ -1350,7 +1341,14 @@
     if (loserCard) {
       showRatingAnimation(loserCard, loserRating, outcome.newLoserRating, outcome.loserChange, false);
     }
-    setTimeout(() => loadNewPair(), 1500);
+    setTimeout(() => {
+      const isVictoryVisible = document.querySelector(".hon-victory-screen");
+      if (!isVictoryVisible) {
+        loadNewPair();
+      } else {
+        console.log("[HotOrNot] Victory screen detected, cancelling next pair load.");
+      }
+    }, 1500);
   }
   var init_match_handler = __esm({
     "match-handler.js"() {
@@ -1363,6 +1361,20 @@
   });
 
   // battle-engine.js
+  var battle_engine_exports = {};
+  __export(battle_engine_exports, {
+    fetchChampionPairPerformers: () => fetchChampionPairPerformers,
+    fetchChampionPairScenes: () => fetchChampionPairScenes,
+    fetchGauntletPairPerformers: () => fetchGauntletPairPerformers,
+    fetchGauntletPairScenes: () => fetchGauntletPairScenes,
+    fetchPair: () => fetchPair,
+    fetchSwissPairImages: () => fetchSwissPairImages,
+    fetchSwissPairPerformers: () => fetchSwissPairPerformers,
+    fetchSwissPairScenes: () => fetchSwissPairScenes,
+    handleMatchmakingLogic: () => handleMatchmakingLogic,
+    isChampionVictory: () => isChampionVictory,
+    loadNewPair: () => loadNewPair
+  });
   async function fetchPair() {
     const { battleType, currentMode, selectedGenders } = state;
     if (currentMode === "swiss") {
@@ -1815,20 +1827,20 @@
       document.removeEventListener("keydown", handleGlobalKeys);
       return;
     }
-    const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
-    if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
-      e.stopImmediatePropagation();
+    const isSpace = e.key === " " || e.code === "Space";
+    const hotKeys = ["ArrowLeft", "ArrowRight", ...isSpace ? [" ", "Space"] : []];
+    if (hotKeys.includes(e.key) || e.code && hotKeys.includes(e.code)) {
       e.preventDefault();
+      e.stopImmediatePropagation();
       if (e.key === "ArrowLeft") {
-        const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"]');
-        leftCard?.querySelector(".hon-scene-body")?.click();
-      }
-      if (e.key === "ArrowRight") {
-        const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"]');
-        rightCard?.querySelector(".hon-scene-body")?.click();
-      }
-      if (e.key === " " || e.code === "Space") {
-        document.getElementById("hon-skip-btn")?.click();
+        activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+      } else if (e.key === "ArrowRight") {
+        activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+      } else if (isSpace) {
+        const skipBtn = document.getElementById("hon-skip-btn") || activeModal.querySelector(".hon-gauntlet-skip");
+        if (skipBtn) {
+          skipBtn.click();
+        }
       }
     }
   }
@@ -1873,29 +1885,37 @@
       console.error("CRASH in _buildAndOpenModal:", err);
     }
   }
-  function openRankingModal() {
+  async function openRankingModal() {
     try {
       const path = window.location.pathname;
-      state.battleType = path.includes("/images") ? "images" : "performers";
       const performerMatch = path.match(/\/performers\/(\d+)/);
-      if (performerMatch && state.currentMode === "gauntlet") {
+      const isSinglePerformerPage = !!performerMatch;
+      if (isSinglePerformerPage) {
         const performerId = performerMatch[1];
-        Promise.resolve().then(() => (init_api_client(), api_client_exports)).then(async ({ fetchPerformerById: fetchPerformerById2 }) => {
-          try {
-            const performer = await fetchPerformerById2(performerId);
-            if (performer) {
-              state.gauntletChampion = performer;
-              state.gauntletWins = 0;
-              state.gauntletDefeated = [];
-              state.gauntletFalling = false;
-              state.gauntletFallingItem = null;
-            }
-          } catch (e) {
-            console.warn("[HotOrNot] Could not pre-seed performer for gauntlet:", e);
-          }
+        if (state.currentMode === "gauntlet" && state.gauntletChampion && state.gauntletChampion.id.toString() === performerId) {
+          console.log("[HotOrNot] Resuming existing Gauntlet run.");
           _buildAndOpenModal();
-        });
-        return;
+          return;
+        }
+        state.battleType = "performers";
+        state.currentMode = "gauntlet";
+        const { fetchPerformerById: fetchPerformerById2 } = await Promise.resolve().then(() => (init_api_client(), api_client_exports));
+        try {
+          const performer = await fetchPerformerById2(performerId);
+          if (performer) {
+            state.gauntletChampion = performer;
+            state.gauntletWins = 0;
+            state.gauntletDefeated = [];
+            state.gauntletFalling = false;
+            state.gauntletFallingItem = null;
+          }
+        } catch (e) {
+          console.warn("[HotOrNot] Could not pre-seed performer:", e);
+        }
+      } else {
+        state.battleType = path.includes("/images") ? "images" : "performers";
+        state.currentMode = "swiss";
+        state.gauntletChampion = null;
       }
       _buildAndOpenModal();
     } catch (err) {
@@ -1983,37 +2003,53 @@
     });
     const skipBtn = parent.querySelector("#hon-skip-btn");
     if (skipBtn) {
-      skipBtn.style.display = state.currentMode === "swiss" ? "block" : "none";
+      const isSkippableMode = state.currentMode === "swiss" || state.currentMode === "gauntlet";
+      skipBtn.style.display = isSkippableMode ? "block" : "none";
       skipBtn.onclick = () => {
-        if (state.currentMode === "swiss")
+        if (state.currentMode === "swiss" || state.currentMode === "gauntlet") {
           handleSkip();
+        }
       };
     }
     parent.querySelectorAll(".hon-gender-btn").forEach((btn) => {
       btn.addEventListener("click", () => handleGenderToggle(btn.dataset.gender));
     });
     parent.querySelectorAll(".hon-mode-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const newMode = btn.dataset.mode;
         if (state.currentMode === newMode)
           return;
         state.currentMode = newMode;
-        state.gauntletChampion = null;
-        state.gauntletFalling = false;
-        state.gauntletWins = 0;
-        state.gauntletDefeated = [];
+        const { getPerformerIdFromUrl: getPerformerIdFromUrl2 } = await Promise.resolve().then(() => (init_ui_modal(), ui_modal_exports));
+        const urlPerformerId = getPerformerIdFromUrl2();
+        if (!urlPerformerId || state.gauntletChampion && state.gauntletChampion.id.toString() !== urlPerformerId) {
+          state.gauntletChampion = null;
+          state.gauntletWins = 0;
+          state.gauntletDefeated = [];
+          state.gauntletFalling = false;
+        }
         const modalContent = document.querySelector(".hon-modal-content");
-        const mainContainer = document.getElementById("stash-main-container");
         if (modalContent) {
           modalContent.innerHTML = `<span class="hon-modal-close">\u2715</span>${createMainUI()}`;
           attachEventListeners(modalContent);
           modalContent.querySelector(".hon-modal-close").onclick = () => Promise.resolve().then(() => (init_ui_modal(), ui_modal_exports)).then((m) => m.closeRankingModal());
-        } else if (mainContainer) {
-          mainContainer.innerHTML = createMainUI();
-          attachEventListeners(mainContainer);
         }
         if (newMode === "gauntlet") {
-          window.showPerformerSelection();
+          if (urlPerformerId && !state.gauntletChampion) {
+            const { fetchPerformerById: fetchPerformerById2 } = await Promise.resolve().then(() => (init_api_client(), api_client_exports));
+            state.gauntletChampion = await fetchPerformerById2(urlPerformerId);
+          }
+          if (state.gauntletChampion) {
+            const selEl = document.getElementById("hon-performer-selection");
+            const compEl = document.getElementById("hon-comparison-area");
+            if (selEl)
+              selEl.style.display = "none";
+            if (compEl)
+              compEl.style.display = "";
+            loadNewPair();
+          } else {
+            window.showPerformerSelection();
+          }
         } else {
           loadNewPair();
         }

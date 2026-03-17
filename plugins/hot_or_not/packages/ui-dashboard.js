@@ -80,49 +80,76 @@ export function attachEventListeners(parent = document) {
     link.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // 3. Skip Button
-  const skipBtn = parent.querySelector("#hon-skip-btn");
-  if (skipBtn) {
-    skipBtn.style.display = (state.currentMode === 'swiss') ? 'block' : 'none';
-    skipBtn.onclick = () => {
-      if (state.currentMode === 'swiss') handleSkip();
-    };
-  }
 
+// 3. Skip Button
+const skipBtn = parent.querySelector("#hon-skip-btn");
+if (skipBtn) {
+  // Logic change: Show for both swiss AND gauntlet
+  const isSkippableMode = state.currentMode === 'swiss' || state.currentMode === 'gauntlet';
+  skipBtn.style.display = isSkippableMode ? 'block' : 'none';
+
+  skipBtn.onclick = () => {
+    // In Gauntlet, skipping usually means loading a new opponent 
+    // loadNewPair() handles the logic for both modes correctly
+    if (state.currentMode === 'swiss' || state.currentMode === 'gauntlet') {
+      handleSkip(); 
+    }
+  };
+}
   // 4. Gender Toggles
   parent.querySelectorAll(".hon-gender-btn").forEach(btn => {
     btn.addEventListener("click", () => handleGenderToggle(btn.dataset.gender));
   });
 
-  // 5. Mode Switches
+// 5. Mode Switches
   parent.querySelectorAll(".hon-mode-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const newMode = btn.dataset.mode;
       if (state.currentMode === newMode) return;
 
       state.currentMode = newMode;
-      state.gauntletChampion = null;
-      state.gauntletFalling = false;
-      state.gauntletWins = 0;
-      state.gauntletDefeated = [];
 
-      // Re-render whichever container is active
+      // Import the ID helper from your modal controller
+      const { getPerformerIdFromUrl } = await import('./ui-modal.js');
+      const urlPerformerId = getPerformerIdFromUrl();
+
+      // Only wipe the state if we AREN'T on a performer page, 
+      // or if the champion doesn't match the current page
+      if (!urlPerformerId || (state.gauntletChampion && state.gauntletChampion.id.toString() !== urlPerformerId)) {
+        state.gauntletChampion = null;
+        state.gauntletWins = 0;
+        state.gauntletDefeated = [];
+        state.gauntletFalling = false;
+      }
+
+      // Re-render the UI
       const modalContent = document.querySelector(".hon-modal-content");
-      const mainContainer = document.getElementById('stash-main-container');
-
       if (modalContent) {
         modalContent.innerHTML = `<span class="hon-modal-close">✕</span>${createMainUI()}`;
         attachEventListeners(modalContent);
-        // Lazy import to avoid circular dep: ui-dashboard -> ui-modal -> ui-dashboard
         modalContent.querySelector(".hon-modal-close").onclick = () =>
           import('./ui-modal.js').then(m => m.closeRankingModal());
-      } else if (mainContainer) {
-        mainContainer.innerHTML = createMainUI();
-        attachEventListeners(mainContainer);
       }
 
+      // SMART REDIRECT:
       if (newMode === "gauntlet") {
-        window.showPerformerSelection();
+        if (urlPerformerId && !state.gauntletChampion) {
+          // If we are on a performer page but don't have the data yet, fetch it
+          const { fetchPerformerById } = await import('./api-client.js');
+          state.gauntletChampion = await fetchPerformerById(urlPerformerId);
+        }
+
+        if (state.gauntletChampion) {
+          // We have a champion! Hide selection and start the match
+          const selEl = document.getElementById("hon-performer-selection");
+          const compEl = document.getElementById("hon-comparison-area");
+          if (selEl) selEl.style.display = "none";
+          if (compEl) compEl.style.display = "";
+          loadNewPair();
+        } else {
+          // No champion found, show the selection grid
+          window.showPerformerSelection();
+        }
       } else {
         loadNewPair();
       }

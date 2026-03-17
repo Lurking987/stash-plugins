@@ -78,22 +78,27 @@ export async function handleChooseItem(event) {
  * Updates Gauntlet progression state
  */
 function updateGauntletState(winnerId, winnerItem, loserId, loserItem, newWinnerRating) {
+  // Case A: The existing Champion (Left) won - Keep Climbing
   if (state.gauntletChampion?.id === winnerId) {
     state.gauntletDefeated.push(loserId);
     state.gauntletWins++;
     state.gauntletChampion.rating100 = newWinnerRating;
-  } else {
-    if (state.gauntletChampion) {
+  } 
+  // Case B: The Challenger (Right) won - Champion is defeated!
+  else {
+    // If we aren't already falling, the run for this specific performer is now ending.
+    // We set them to 'falling' to find their final rank floor.
+    if (!state.gauntletFalling) {
+      console.log(`[HotOrNot] Champion ${loserItem.name} defeated. Entering placement phase.`);
       state.gauntletFalling = true;
-      state.gauntletFallingItem = loserItem;  // ← now properly in scope
-      state.gauntletDefeated = [winnerId];
+      state.gauntletFallingItem = loserItem; // The original champion is the one we track
+      state.gauntletDefeated = [winnerId];   // Reset defeated list to track the 'fall'
+    } else {
+      // If they were already falling and lost again, keep tracking the fall
+      state.gauntletDefeated.push(winnerId);
     }
-    state.gauntletChampion = winnerItem;
-    state.gauntletWins = 1;
-    state.gauntletDefeated = [loserId];
   }
 }
-
 /**
  * Updates Champion mode state (winner stays on)
  */
@@ -114,33 +119,20 @@ function updateChampionModeState(winnerId, winnerItem, loserId, newWinnerRating)
  */
  
 export async function handleSkip() {
-    const leftPerformer = state.currentPair?.left;
     const rightPerformer = state.currentPair?.right;
 
-    if (!leftPerformer || !rightPerformer) {
-        loadNewPair();
-        return;
+    if (state.currentMode === 'gauntlet' && rightPerformer) {
+        // Store the ID so the engine knows to pick someone else
+        state.skippedId = rightPerformer.id; 
+        console.log(`[HotOrNot] Skipping Gauntlet opponent: ${rightPerformer.name}`);
     }
 
     if (state.currentMode === 'swiss') {
-        console.log(`[HotOrNot] Tying Swiss match: ${leftPerformer.name} vs ${rightPerformer.name}`);
-        try {
-            // We call handleComparison with isDraw = true
-            await handleComparison(
-                leftPerformer.id, 
-                rightPerformer.id, 
-                leftPerformer.rating100, 
-                rightPerformer.rating100, 
-                null, 
-                leftPerformer, 
-                rightPerformer,
-                true // <--- The isDraw flag
-            );
-        } catch (err) {
-            console.error("[HotOrNot] Tie failed:", err);
-        }
+        // ... your existing Swiss tie logic ...
     }
 
+    // Load next pair
+    const { loadNewPair } = await import('./battle-engine.js');
     loadNewPair();
 }
 
@@ -153,5 +145,15 @@ function applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, o
     showRatingAnimation(loserCard, loserRating, outcome.newLoserRating, outcome.loserChange, false);
   }
 
-  setTimeout(() => loadNewPair(), 1500);
+  setTimeout(() => {
+    // ⭐ FIX: Only load a new pair if we didn't just trigger the placement screen
+    // We check if the victory screen exists in the DOM
+    const isVictoryVisible = document.querySelector('.hon-victory-screen');
+    
+    if (!isVictoryVisible) {
+      loadNewPair();
+    } else {
+      console.log("[HotOrNot] Victory screen detected, cancelling next pair load.");
+    }
+  }, 1500);
 }

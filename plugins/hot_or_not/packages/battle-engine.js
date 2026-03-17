@@ -248,34 +248,49 @@ export async function fetchChampionPairPerformers() {
  * ============================================
  */
 
-function handleMatchmakingLogic(list, type) {
-  // 1. Handle Falling State
-  if (state.gauntletFalling && state.gauntletFallingItem) {
-    const fallIdx = list.findIndex(i => i.id === state.gauntletFallingItem.id);
-    const below = list.filter((i, idx) => idx > fallIdx && !state.gauntletDefeated.includes(i.id));
-    
-    if (below.length === 0) {
-      return { items: [state.gauntletFallingItem], ranks: [list.length], isVictory: false, isPlacement: true, placementRank: list.length, placementRating: 1 };
-    }
-    const nextBelow = below[0];
-    return { items: [state.gauntletFallingItem, nextBelow], ranks: [fallIdx + 1, list.indexOf(nextBelow) + 1], isFalling: true };
-  }
-
-  // 2. No Champion - Start New
+export function handleMatchmakingLogic(list, type) {
+  // ⭐ ADD THIS GUARD CLAUSE
   if (!state.gauntletChampion) {
-    const challenger = list[Math.floor(Math.random() * list.length)];
-    const lowest = [...list].sort((a, b) => (a.rating100 || 0) - (b.rating100 || 0))[0];
-    return { items: [challenger, lowest], ranks: [list.indexOf(challenger) + 1, list.indexOf(lowest) + 1], isVictory: false };
+    console.warn("[HotOrNot] No champion selected, picking a random starter.");
+    const randomStarter = list[Math.floor(Math.random() * list.length)];
+    return { items: [randomStarter, list.find(i => i.id !== randomStarter.id)], ranks: [null, null], isVictory: false };
   }
 
-  // 3. Existing Champion - Find Next
+  // Now this line is safe
   const champIdx = list.findIndex(i => i.id === state.gauntletChampion.id);
-  const opponents = list.filter((i, idx) => i.id !== state.gauntletChampion.id && !state.gauntletDefeated.includes(i.id) && (idx < champIdx || (i.rating100 || 0) >= (state.gauntletChampion.rating100 || 0)));
 
-  if (opponents.length === 0) return { items: [state.gauntletChampion], ranks: [1], isVictory: true };
+  // 1. Identify "The Wall": Performers ranked HIGHER than our champion 
+  // (In a DESC sorted list, these are indices 0 through champIdx - 1)
+  let potentialOpponents = list.filter((item, idx) => 
+    idx < champIdx && 
+    !state.gauntletDefeated.includes(item.id) &&
+    item.id !== state.skippedId
+  );
 
-  const nextOpponent = opponents[opponents.length - 1]; // Closest opponent
-  return { items: [state.gauntletChampion, nextOpponent], ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1], isVictory: false };
+  // 2. If we've beaten everyone above us, check for a "Victory"
+  if (potentialOpponents.length === 0) {
+    // If we only have 0 because of a skip, clear skip and try one last time
+    if (state.skippedId) {
+      state.skippedId = null;
+      return handleMatchmakingLogic(list, type);
+    }
+    return { items: [state.gauntletChampion], ranks: [1], isVictory: true };
+  }
+
+  // 3. SMART SELECTION:
+  // Instead of picking from the whole list (which includes unrated),
+  // pick from the 5 performers ranked immediately ABOVE the champion.
+  const proximityWindow = Math.min(5, potentialOpponents.length);
+  const randomIdx = Math.floor(Math.random() * proximityWindow);
+
+  // Grab from the end of the "higher ranked" list
+  const nextOpponent = potentialOpponents[potentialOpponents.length - 1 - randomIdx];
+
+  return { 
+    items: [state.gauntletChampion, nextOpponent], 
+    ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1], 
+    isVictory: false 
+  };
 }
 
 export function isChampionVictory(currentIndex, defeatedList, totalList) {

@@ -33,25 +33,29 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  const hotKeys = ["ArrowLeft", "ArrowRight", " ", "Space"];
-  if (hotKeys.includes(e.key) || hotKeys.includes(e.code)) {
-    e.stopImmediatePropagation();
+  const isSpace = e.key === " " || e.code === "Space";
+  const hotKeys = ["ArrowLeft", "ArrowRight", ... (isSpace ? [" ", "Space"] : [])];
+
+  if (hotKeys.includes(e.key) || (e.code && hotKeys.includes(e.code))) {
+    // Prevent scrolling when pressing space
     e.preventDefault();
+    e.stopImmediatePropagation();
 
     if (e.key === "ArrowLeft") {
-      const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"]');
-      leftCard?.querySelector('.hon-scene-body')?.click();
-    }
-    if (e.key === "ArrowRight") {
-      const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"]');
-      rightCard?.querySelector('.hon-scene-body')?.click();
-    }
-    if (e.key === " " || e.code === "Space") {
-      document.getElementById("hon-skip-btn")?.click();
+      activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+    } else if (e.key === "ArrowRight") {
+      activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+    } else if (isSpace) {
+      // Try to find the skip button - check for both standard and gauntlet IDs
+      const skipBtn = document.getElementById("hon-skip-btn") || 
+                      activeModal.querySelector(".hon-gauntlet-skip"); // adjust selector if gauntlet uses a class
+      
+      if (skipBtn) {
+        skipBtn.click();
+      }
     }
   }
 }
-
 function _buildAndOpenModal() {
   try {
     const existing = document.getElementById("hon-modal");
@@ -96,39 +100,55 @@ function _buildAndOpenModal() {
   }
 }
 
-export function openRankingModal() {
+export async function openRankingModal() {
   try {
     const path = window.location.pathname;
-    state.battleType = path.includes('/images') ? "images" : "performers";
-
-    // If on a single performer page in Gauntlet mode, pre-seed that performer as champion
     const performerMatch = path.match(/\/performers\/(\d+)/);
-    if (performerMatch && state.currentMode === "gauntlet") {
+    const isSinglePerformerPage = !!performerMatch;
+
+    // 1. If we are on a performer page
+    if (isSinglePerformerPage) {
       const performerId = performerMatch[1];
-      import('./api-client.js').then(async ({ fetchPerformerById }) => {
-        try {
-          const performer = await fetchPerformerById(performerId);
-          if (performer) {
-            state.gauntletChampion = performer;
-            state.gauntletWins = 0;
-            state.gauntletDefeated = [];
-            state.gauntletFalling = false;
-            state.gauntletFallingItem = null;
-          }
-        } catch (e) {
-          console.warn("[HotOrNot] Could not pre-seed performer for gauntlet:", e);
-        }
+      
+      // ⭐ CHECK: If a gauntlet is already running for THIS performer, just open the modal
+      if (state.currentMode === "gauntlet" && 
+          state.gauntletChampion && 
+          state.gauntletChampion.id.toString() === performerId) {
+        console.log("[HotOrNot] Resuming existing Gauntlet run.");
         _buildAndOpenModal();
-      });
-      return;
+        return; 
+      }
+
+      // Otherwise, initialize a NEW gauntlet run
+      state.battleType = "performers";
+      state.currentMode = "gauntlet";
+      
+      const { fetchPerformerById } = await import('./api-client.js');
+      try {
+        const performer = await fetchPerformerById(performerId);
+        if (performer) {
+          state.gauntletChampion = performer;
+          state.gauntletWins = 0;
+          state.gauntletDefeated = [];
+          state.gauntletFalling = false;
+          state.gauntletFallingItem = null;
+        }
+      } catch (e) {
+        console.warn("[HotOrNot] Could not pre-seed performer:", e);
+      }
+    } else {
+      // Logic for non-performer pages (Swiss Mode)
+      state.battleType = path.includes('/images') ? "images" : "performers";
+      state.currentMode = "swiss";
+      state.gauntletChampion = null;
     }
 
     _buildAndOpenModal();
+
   } catch (err) {
     console.error("CRASH in openRankingModal:", err);
   }
 }
-
 export function closeRankingModal() {
   const gameModal = document.getElementById("hon-modal");
   const statsModal = document.getElementById("hon-stats-modal");
