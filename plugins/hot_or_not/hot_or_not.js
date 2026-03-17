@@ -17,6 +17,8 @@
     state.gauntletFalling = false;
     state.gauntletFallingItem = null;
     state.gauntletChampionRank = 0;
+    state.matchHistory = [];
+    state.skippedId = null;
   }
   var state;
   var init_state = __esm({
@@ -37,13 +39,18 @@
         gauntletWins: 0,
         gauntletChampionRank: 0,
         gauntletDefeated: [],
+        // tracks defeated opponents in the current climb (shared by gauntlet + champion)
         gauntletFalling: false,
         gauntletFallingItem: null,
         // Filters & Settings
         cachedUrlFilter: null,
         badgeInjectionInProgress: false,
         pluginConfigCache: null,
-        selectedGenders: ["FEMALE"]
+        selectedGenders: ["FEMALE"],
+        // Undo history — each entry stores enough to reverse a match
+        matchHistory: [],
+        // Skip tracking
+        skippedId: null
       };
     }
   });
@@ -318,26 +325,22 @@
 
   // formatters.js
   function getGenderDisplay(gender) {
-    if (!gender)
-      return "";
+    if (!gender) return "";
     return (ALL_GENDERS.find((g) => g.value === gender) || { label: gender }).label;
   }
   function formatDuration(seconds) {
-    if (!seconds)
-      return "N/A";
+    if (!seconds) return "N/A";
     const h = Math.floor(seconds / 3600);
     const m = Math.floor(seconds % 3600 / 60);
     const s = Math.floor(seconds % 60);
     return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${m}:${s.toString().padStart(2, "0")}`;
   }
   function escapeHtml(unsafe) {
-    if (!unsafe)
-      return "";
+    if (!unsafe) return "";
     return String(unsafe).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
   function getCountryDisplay(countryCode) {
-    if (!countryCode)
-      return "";
+    if (!countryCode) return "";
     const code = countryCode.toUpperCase().trim();
     const name = COUNTRY_NAMES[code] || escapeHtml(code);
     const flagClass = `fi fi-${code.toLowerCase().replace(/[^a-z]/g, "")}`;
@@ -352,10 +355,8 @@
   // ui-cards.js
   function renderCard(item, side, rank) {
     const streak = state.gauntletChampion?.id === item.id ? state.gauntletWins : null;
-    if (state.battleType === "performers")
-      return createPerformerCard(item, side, rank, streak);
-    if (state.battleType === "images")
-      return createImageCard(item, side, rank, streak);
+    if (state.battleType === "performers") return createPerformerCard(item, side, rank, streak);
+    if (state.battleType === "images") return createImageCard(item, side, rank, streak);
     return createSceneCard(item, side, rank, streak);
   }
   function createSceneCard(scene, side, rank = null, streak = null) {
@@ -497,8 +498,7 @@
             for (const criteriaStr of criteriaStrings) {
               try {
                 const criterion = JSON.parse(criteriaStr.trim());
-                if (criterion?.type)
-                  allParsedCriteria.push(criterion);
+                if (criterion?.type) allParsedCriteria.push(criterion);
               } catch (splitParseErr) {
                 console.warn("[HotOrNot] Could not parse criterion:", criteriaStr);
               }
@@ -513,8 +513,7 @@
     }
   }
   function extractSimpleValue(value) {
-    if (value === void 0 || value === null)
-      return value;
+    if (value === void 0 || value === null) return value;
     if (typeof value === "object" && !Array.isArray(value) && value.value !== void 0) {
       return value.value;
     }
@@ -522,18 +521,15 @@
   }
   function safeParseInt(value, defaultValue = 0) {
     const simpleValue = extractSimpleValue(value);
-    if (simpleValue === void 0 || simpleValue === null)
-      return defaultValue;
+    if (simpleValue === void 0 || simpleValue === null) return defaultValue;
     const parsed = parseInt(simpleValue, 10);
     return isNaN(parsed) ? defaultValue : parsed;
   }
   function normalizeGenderValue(value) {
-    if (!value || typeof value !== "string")
-      return value;
+    if (!value || typeof value !== "string") return value;
     const normalized = value.toUpperCase().replace(/[\s-]+/g, "_");
     const validGenders = /* @__PURE__ */ new Set(["MALE", "FEMALE", "TRANSGENDER_MALE", "TRANSGENDER_FEMALE", "INTERSEX", "NON_BINARY"]);
-    if (validGenders.has(normalized))
-      return normalized;
+    if (validGenders.has(normalized)) return normalized;
     console.warn(`[HotOrNot] Invalid gender value "${value}"`);
     return value;
   }
@@ -548,8 +544,7 @@
     return filterObj;
   }
   function convertCriterionToFilter(criterion) {
-    if (!criterion || !criterion.type)
-      return null;
+    if (!criterion || !criterion.type) return null;
     const { type, value, modifier } = criterion;
     switch (type) {
       case "tags":
@@ -580,8 +575,7 @@
                 }
               };
             } else {
-              if (Array.isArray(genderValue))
-                genderValue = genderValue[0] || null;
+              if (Array.isArray(genderValue)) genderValue = genderValue[0] || null;
               if (genderValue) {
                 return {
                   gender: { value: normalizeGenderValue(genderValue), modifier: effectiveModifier }
@@ -609,8 +603,7 @@
       case "eye_color":
         if (value) {
           const simpleVal = extractSimpleValue(value);
-          if (simpleVal)
-            return { [type]: { value: simpleVal, modifier: modifier || "EQUALS" } };
+          if (simpleVal) return { [type]: { value: simpleVal, modifier: modifier || "EQUALS" } };
         }
         break;
       case "scene_count":
@@ -623,10 +616,8 @@
       case "stash_id_endpoint":
         if (value && typeof value === "object") {
           const stashIdFilter = {};
-          if (value.stash_id)
-            stashIdFilter.stash_id = value.stash_id;
-          if (value.endpoint)
-            stashIdFilter.endpoint = value.endpoint;
+          if (value.stash_id) stashIdFilter.stash_id = value.stash_id;
+          if (value.endpoint) stashIdFilter.endpoint = value.endpoint;
           if (Object.keys(stashIdFilter).length > 0) {
             stashIdFilter.modifier = modifier || "NOT_NULL";
             return { stash_id_endpoint: stashIdFilter };
@@ -649,8 +640,7 @@
       case "updated_at":
         const textVal = extractSimpleValue(value);
         const defaultMod = type === "birthdate" || type === "death_date" ? "EQUALS" : type.includes("_at") ? "GREATER_THAN" : "INCLUDES";
-        if (textVal)
-          return { [type]: { value: textVal, modifier: modifier || defaultMod } };
+        if (textVal) return { [type]: { value: textVal, modifier: modifier || defaultMod } };
         break;
       default:
         console.log(`[HotOrNot] Unknown criterion type: ${type}`);
@@ -663,8 +653,7 @@
     const filter = {};
     for (const criterion of criteria) {
       const filterPart = convertCriterionToFilter(criterion);
-      if (filterPart)
-        Object.assign(filter, filterPart);
+      if (filterPart) Object.assign(filter, filterPart);
     }
     return filter;
   }
@@ -689,28 +678,21 @@
   // math-utils.js
   function getRecencyWeight(performer) {
     const stats = parsePerformerEloData(performer);
-    if (!stats.last_match)
-      return 1;
+    if (!stats.last_match) return 1;
     const hoursSince = (Date.now() - new Date(stats.last_match).getTime()) / (1e3 * 60 * 60);
-    if (hoursSince < 1)
-      return 0.1;
-    if (hoursSince < 6)
-      return 0.3;
-    if (hoursSince < 24)
-      return 0.6;
+    if (hoursSince < 1) return 0.1;
+    if (hoursSince < 6) return 0.3;
+    if (hoursSince < 24) return 0.6;
     return 1;
   }
   function weightedRandomSelect(items, weights) {
-    if (!items?.length || items.length !== weights?.length)
-      return null;
+    if (!items?.length || items.length !== weights?.length) return null;
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-    if (totalWeight <= 0)
-      return items[Math.floor(Math.random() * items.length)];
+    if (totalWeight <= 0) return items[Math.floor(Math.random() * items.length)];
     let random = Math.random() * totalWeight;
     for (let i = 0; i < items.length; i++) {
       random -= weights[i];
-      if (random <= 0)
-        return items[i];
+      if (random <= 0) return items[i];
     }
     return items[items.length - 1];
   }
@@ -725,8 +707,7 @@
       worst_streak: 0,
       last_match: null
     };
-    if (!performer?.custom_fields)
-      return defaultStats;
+    if (!performer?.custom_fields) return defaultStats;
     if (performer.custom_fields.hotornot_stats) {
       try {
         const stats = JSON.parse(performer.custom_fields.hotornot_stats);
@@ -736,8 +717,7 @@
       }
     }
     const eloMatches = parseInt(performer.custom_fields.elo_matches, 10);
-    if (!isNaN(eloMatches))
-      return { ...defaultStats, total_matches: eloMatches };
+    if (!isNaN(eloMatches)) return { ...defaultStats, total_matches: eloMatches };
     return defaultStats;
   }
   function updatePerformerStats(currentStats, won) {
@@ -768,12 +748,46 @@
     return mode === "champion" ? Math.max(1, Math.round(baseK * 0.5)) : baseK;
   }
   function isActiveParticipant(performerId, mode, gauntletChampion, gauntletFallingItem) {
-    if (mode === "swiss" || mode === "champion")
-      return true;
+    if (mode === "swiss" || mode === "champion") return true;
     if (mode === "gauntlet") {
       return performerId === gauntletChampion?.id || performerId === gauntletFallingItem?.id;
     }
     return false;
+  }
+  function calculateMatchOutcome({
+    winnerRating,
+    loserRating,
+    mode,
+    winnerMatchCount,
+    loserMatchCount,
+    isChampionWinner,
+    isFallingWinner,
+    isChampionLoser,
+    isFallingLoser,
+    loserRank
+  }) {
+    const ratingDiff = loserRating - winnerRating;
+    const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
+    let winnerGain = 0;
+    let loserLoss = 0;
+    if (mode === "gauntlet") {
+      const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
+      if (isChampionWinner || isFallingWinner) {
+        winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
+      }
+      if (isChampionLoser || isFallingLoser) {
+        loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
+      }
+      if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
+        loserLoss = 1;
+      }
+    } else {
+      const winnerK = getKFactor(winnerRating, winnerMatchCount, mode);
+      const loserK = getKFactor(loserRating, loserMatchCount, mode);
+      winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
+      loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
+    }
+    return { winnerGain, loserLoss };
   }
   var init_math_utils = __esm({
     "math-utils.js"() {
@@ -799,6 +813,7 @@
     graphqlQuery: () => graphqlQuery,
     handleComparison: () => handleComparison,
     isBattleRankBadgeEnabled: () => isBattleRankBadgeEnabled,
+    undoLastMatch: () => undoLastMatch,
     updateImageRating: () => updateImageRating,
     updateItemRating: () => updateItemRating,
     updatePerformerRating: () => updatePerformerRating,
@@ -823,8 +838,7 @@
       body: JSON.stringify({ query, variables })
     });
     const result = await response.json();
-    if (result.errors)
-      throw new Error(result.errors[0].message);
+    if (result.errors) throw new Error(result.errors[0].message);
     return result.data;
   }
   async function fetchSceneCount() {
@@ -876,7 +890,6 @@
   async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null, isDraw = false) {
     const winnerRating = winnerCurrentRating || 50;
     const loserRating = loserCurrentRating || 50;
-    const ratingDiff = loserRating - winnerRating;
     let freshWinnerObj = winnerObj;
     let freshLoserObj = loserObj;
     if (state.battleType === "performers") {
@@ -896,51 +909,63 @@
     let winnerGain = 0;
     let loserLoss = 0;
     if (isDraw) {
-      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-      const expectedLoser = 1 - expectedWinner;
+      const ratingDiff2 = loserRating - winnerRating;
+      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff2 / 400));
       const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
       const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
       winnerGain = Math.round(winnerK * (0.5 - expectedWinner));
-      loserLoss = Math.round(loserK * (expectedLoser - 0.5));
+      loserLoss = Math.round(loserK * (1 - expectedWinner - 0.5));
     } else {
-      if (state.currentMode === "gauntlet") {
-        const isChampionWinner = state.gauntletChampion && winnerId === state.gauntletChampion.id;
-        const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
-        const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
-        const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
-        if (isChampionWinner || isFallingWinner) {
-          winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
-        }
-        if (isChampionLoser || isFallingLoser) {
-          loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
-        }
-        if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
-          loserLoss = 1;
-        }
-      } else if (state.currentMode === "champion") {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
-        const loserK = getKFactor(loserRating, loserMatchCount, "champion");
-        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
-      } else {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
-        const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
-        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
-      }
+      const isChampionWinner = !!state.gauntletChampion && winnerId === state.gauntletChampion.id;
+      const isFallingWinner = state.gauntletFalling && !!state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
+      const isChampionLoser = !!state.gauntletChampion && loserId === state.gauntletChampion.id;
+      const isFallingLoser = state.gauntletFalling && !!state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
+      ({ winnerGain, loserLoss } = calculateMatchOutcome({
+        winnerRating,
+        loserRating,
+        mode: state.currentMode,
+        winnerMatchCount,
+        loserMatchCount,
+        isChampionWinner,
+        isFallingWinner,
+        isChampionLoser,
+        isFallingLoser,
+        loserRank
+      }));
     }
     const newWinnerRating = Math.min(100, Math.max(1, winnerRating + winnerGain));
     const newLoserRating = Math.min(100, Math.max(1, loserRating - loserLoss));
-    const winnerRankAtStart = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
     const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
     const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
     const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
     const winnerStatus = isDraw ? null : true;
     const loserStatus = isDraw ? null : false;
+    const winnerOldStats = shouldTrackWinner && freshWinnerObj ? parsePerformerEloData(freshWinnerObj) : null;
+    const loserOldStats = shouldTrackLoser && freshLoserObj ? parsePerformerEloData(freshLoserObj) : null;
+    if (!state.matchHistory) state.matchHistory = [];
+    state.matchHistory.push({
+      winnerId,
+      loserId,
+      winnerOldRating: winnerRating,
+      loserOldRating: loserRating,
+      winnerOldStats,
+      loserOldStats,
+      // Full pair snapshot so undo can re-render exact previous matchup
+      pairSnapshot: {
+        left: state.currentPair.left ? { ...state.currentPair.left } : null,
+        right: state.currentPair.right ? { ...state.currentPair.right } : null,
+        rankLeft: state.currentRanks.left,
+        rankRight: state.currentRanks.right
+      },
+      gauntletSnapshot: {
+        gauntletChampion: state.gauntletChampion ? { ...state.gauntletChampion } : null,
+        gauntletWins: state.gauntletWins,
+        gauntletDefeated: [...state.gauntletDefeated || []],
+        gauntletFalling: state.gauntletFalling,
+        gauntletFallingItem: state.gauntletFallingItem ? { ...state.gauntletFallingItem } : null
+      }
+    });
+    if (state.matchHistory.length > 10) state.matchHistory.shift();
     await updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, winnerStatus);
     await updateItemRating(loserId, newLoserRating, shouldTrackLoser ? freshLoserObj : null, loserStatus);
     return {
@@ -1035,9 +1060,45 @@
       i: { id, rating100: Math.max(1, Math.min(100, Math.round(rating))) }
     });
   }
+  async function undoLastMatch() {
+    if (!state.matchHistory || state.matchHistory.length === 0) return null;
+    const last = state.matchHistory.pop();
+    await updateItemRatingDirect(last.winnerId, last.winnerOldRating, last.winnerOldStats);
+    await updateItemRatingDirect(last.loserId, last.loserOldRating, last.loserOldStats);
+    if (last.gauntletSnapshot) {
+      const snap = last.gauntletSnapshot;
+      state.gauntletChampion = snap.gauntletChampion;
+      state.gauntletWins = snap.gauntletWins;
+      state.gauntletDefeated = [...snap.gauntletDefeated];
+      state.gauntletFalling = snap.gauntletFalling;
+      state.gauntletFallingItem = snap.gauntletFallingItem;
+    }
+    if (last.pairSnapshot) {
+      const { left, right } = last.pairSnapshot;
+      if (left) left.rating100 = last.winnerId === left.id ? last.winnerOldRating : last.loserOldRating;
+      if (right) right.rating100 = last.winnerId === right.id ? last.winnerOldRating : last.loserOldRating;
+      state.currentPair = { left, right };
+      state.currentRanks = { left: last.pairSnapshot.rankLeft, right: last.pairSnapshot.rankRight };
+    }
+    return last.pairSnapshot || null;
+  }
+  async function updateItemRatingDirect(itemId, rating, statsObj) {
+    if (state.battleType === "performers") {
+      await updatePerformerRating(itemId, rating, null, void 0);
+      if (statsObj) {
+        await graphqlQuery(`
+        mutation($id: ID!, $fields: Map) {
+          performerUpdate(input: { id: $id, custom_fields: { partial: $fields } }) { id }
+        }`, { id: itemId, fields: { hotornot_stats: JSON.stringify(statsObj) } });
+      }
+    } else if (state.battleType === "images") {
+      await updateImageRating(itemId, rating);
+    } else {
+      await updateSceneRating(itemId, rating);
+    }
+  }
   async function getHotOrNotConfig() {
-    if (pluginConfigCache)
-      return pluginConfigCache;
+    if (pluginConfigCache) return pluginConfigCache;
     const result = await graphqlQuery(`query { configuration { plugins } }`);
     pluginConfigCache = (result.configuration.plugins || {})["HotOrNot"] || {};
     return pluginConfigCache;
@@ -1066,8 +1127,7 @@
       const ratedPerformers = allPerformers.filter((p) => p.rating100 !== null);
       const total = ratedPerformers.length;
       const index = ratedPerformers.findIndex((p) => p.id === performerId);
-      if (index === -1)
-        return null;
+      if (index === -1) return null;
       let stats = null;
       const statsJson = targetPerformer?.custom_fields?.["hotornot_stats"];
       if (statsJson) {
@@ -1135,16 +1195,14 @@
   }
   async function loadPerformerSelection() {
     const listEl = document.getElementById("hon-performer-list");
-    if (!listEl)
-      return;
+    if (!listEl) return;
     try {
       const performers = await fetchPerformersForSelection(5);
       listEl.innerHTML = performers.map((p) => createSelectionCard(p)).join("");
       listEl.querySelectorAll(".hon-selection-card").forEach((card) => {
         card.onclick = () => {
           const selected = performers.find((p) => p.id.toString() === card.dataset.performerId);
-          if (selected)
-            startGauntletWithPerformer(selected);
+          if (selected) startGauntletWithPerformer(selected);
         };
       });
     } catch (err) {
@@ -1152,13 +1210,16 @@
     }
   }
   function startGauntletWithPerformer(performer) {
+    resetBattleState();
     state.gauntletChampion = performer;
     state.gauntletWins = 0;
-    state.gauntletDefeated = [];
     state.gauntletFalling = false;
-    document.getElementById("hon-performer-selection").style.display = "none";
-    document.getElementById("hon-comparison-area").style.display = "";
-    document.querySelector(".hon-actions").style.display = "";
+    const sel = document.getElementById("hon-performer-selection");
+    const comp = document.getElementById("hon-comparison-area");
+    const actions = document.querySelector(".hon-actions");
+    if (sel) sel.style.display = "none";
+    if (comp) comp.style.display = "";
+    if (actions) actions.style.display = "";
     loadNewPair();
   }
   function showPerformerSelection() {
@@ -1169,10 +1230,8 @@
       selectionContainer.style.display = "block";
       loadPerformerSelection();
     }
-    if (comparisonArea)
-      comparisonArea.style.display = "none";
-    if (actionsEl)
-      actionsEl.style.display = "none";
+    if (comparisonArea) comparisonArea.style.display = "none";
+    if (actionsEl) actionsEl.style.display = "none";
     const modal = document.getElementById("hon-modal");
     if (modal) {
       modal.classList.remove("hon-mode-champion", "hon-mode-swiss");
@@ -1181,8 +1240,7 @@
   }
   function showPlacementScreen(item, rank, finalRating) {
     const comparisonArea = document.getElementById("hon-comparison-area");
-    if (!comparisonArea)
-      return;
+    if (!comparisonArea) return;
     let title, imagePath;
     if (state.battleType === "performers") {
       title = item.name || `Performer #${item.id}`;
@@ -1219,20 +1277,13 @@
     `;
     const statusEl = document.getElementById("hon-gauntlet-status");
     const actionsEl = document.querySelector(".hon-actions");
-    if (statusEl)
-      statusEl.style.display = "none";
-    if (actionsEl)
-      actionsEl.style.display = "none";
-    state.gauntletFalling = false;
-    state.gauntletFallingItem = null;
-    state.gauntletChampion = null;
-    state.gauntletWins = 0;
-    state.gauntletDefeated = [];
+    if (statusEl) statusEl.style.display = "none";
+    if (actionsEl) actionsEl.style.display = "none";
+    resetBattleState();
     const newBtn = comparisonArea.querySelector("#hon-new-gauntlet");
     if (newBtn) {
       newBtn.addEventListener("click", () => {
-        if (actionsEl)
-          actionsEl.style.display = "";
+        if (actionsEl) actionsEl.style.display = "";
         loadNewPair();
       });
     }
@@ -1247,9 +1298,14 @@
   });
 
   // match-handler.js
+  var match_handler_exports = {};
+  __export(match_handler_exports, {
+    handleChooseItem: () => handleChooseItem,
+    handleSkip: () => handleSkip,
+    handleUndo: () => handleUndo
+  });
   async function handleChooseItem(event) {
-    if (state.disableChoice)
-      return;
+    if (state.disableChoice) return;
     state.disableChoice = true;
     const body = event.currentTarget;
     const winnerId = body.dataset.winner;
@@ -1302,7 +1358,8 @@
       state.gauntletWins++;
       state.gauntletChampion.rating100 = newWinnerRating;
     } else {
-      if (state.gauntletChampion) {
+      if (!state.gauntletFalling) {
+        console.log(`[HotOrNot] Champion ${loserItem.name} defeated. Entering placement phase.`);
         state.gauntletFalling = true;
         state.gauntletFallingItem = loserItem;
         state.gauntletDefeated = [winnerId];
@@ -1319,24 +1376,78 @@
     } else {
       state.gauntletChampion = winnerItem;
       state.gauntletWins = 1;
-      state.gauntletDefeated = [loserId];
     }
   }
   async function handleSkip() {
-    const rightPerformer = state.currentPair?.right;
-    if (state.currentMode === "gauntlet" && rightPerformer) {
-      state.skippedId = rightPerformer.id;
-      console.log(`[HotOrNot] Skipping Gauntlet opponent: ${rightPerformer.name}`);
+    const left = state.currentPair?.left;
+    const right = state.currentPair?.right;
+    if (left && right) {
+      const leftRating = left.rating100 || 50;
+      const rightRating = right.rating100 || 50;
+      await handleComparison(
+        left.id,
+        right.id,
+        leftRating,
+        rightRating,
+        null,
+        left,
+        right,
+        true
+        // isDraw
+      );
     }
-    if (state.currentMode === "swiss") {
+    if (state.currentMode === "gauntlet" && right) {
+      state.skippedId = right.id;
+      console.log(`[HotOrNot] Skipping Gauntlet opponent: ${right.name}`);
     }
-    const { loadNewPair: loadNewPair2 } = await Promise.resolve().then(() => (init_battle_engine(), battle_engine_exports));
-    loadNewPair2();
+    loadNewPair();
+  }
+  async function handleUndo() {
+    if (!state.matchHistory || state.matchHistory.length === 0) {
+      console.log("[HotOrNot] Nothing to undo.");
+      return;
+    }
+    const undoBtn = document.getElementById("hon-undo-btn");
+    if (undoBtn) {
+      undoBtn.disabled = true;
+      undoBtn.textContent = "Undoing\u2026";
+    }
+    try {
+      const pairSnapshot = await undoLastMatch();
+      if (pairSnapshot?.left && pairSnapshot?.right) {
+        const { renderCard: renderCard2 } = await Promise.resolve().then(() => (init_ui_manager(), ui_manager_exports));
+        const { attachBattleListenersExternal: attachBattleListenersExternal2 } = await Promise.resolve().then(() => (init_battle_engine(), battle_engine_exports));
+        const area = document.getElementById("hon-comparison-area");
+        if (area) {
+          state.disableChoice = false;
+          area.innerHTML = `
+          <div class="hon-vs-container">
+            ${renderCard2(pairSnapshot.left, "left", pairSnapshot.rankLeft)}
+            <div class="hon-vs-divider"><span>VS</span></div>
+            ${renderCard2(pairSnapshot.right, "right", pairSnapshot.rankRight)}
+          </div>
+        `;
+          attachBattleListenersExternal2(area);
+        }
+        console.log("[HotOrNot] Undo successful \u2014 previous pair restored.");
+      } else {
+        loadNewPair();
+      }
+    } catch (err) {
+      console.error("[HotOrNot] Undo failed:", err);
+      loadNewPair();
+    } finally {
+      const btn = document.getElementById("hon-undo-btn");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "\u21A9 Undo";
+        btn.style.display = state.matchHistory && state.matchHistory.length > 0 ? "inline-block" : "none";
+      }
+    }
   }
   function applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome) {
     winnerCard.classList.add("hon-winner");
-    if (loserCard)
-      loserCard.classList.add("hon-loser");
+    if (loserCard) loserCard.classList.add("hon-loser");
     showRatingAnimation(winnerCard, winnerRating, outcome.newWinnerRating, outcome.winnerChange, true);
     if (loserCard) {
       showRatingAnimation(loserCard, loserRating, outcome.newLoserRating, outcome.loserChange, false);
@@ -1363,6 +1474,7 @@
   // battle-engine.js
   var battle_engine_exports = {};
   __export(battle_engine_exports, {
+    attachBattleListenersExternal: () => attachBattleListenersExternal,
     fetchChampionPairPerformers: () => fetchChampionPairPerformers,
     fetchChampionPairScenes: () => fetchChampionPairScenes,
     fetchGauntletPairPerformers: () => fetchGauntletPairPerformers,
@@ -1372,38 +1484,36 @@
     fetchSwissPairPerformers: () => fetchSwissPairPerformers,
     fetchSwissPairScenes: () => fetchSwissPairScenes,
     handleMatchmakingLogic: () => handleMatchmakingLogic,
-    isChampionVictory: () => isChampionVictory,
     loadNewPair: () => loadNewPair
   });
   async function fetchPair() {
-    const { battleType, currentMode, selectedGenders } = state;
+    const { battleType, currentMode } = state;
     if (currentMode === "swiss") {
-      if (battleType === "performers")
-        return await fetchSwissPairPerformers(state.selectedGenders);
-      if (battleType === "images")
-        return await fetchSwissPairImages();
+      if (battleType === "performers") return await fetchSwissPairPerformers(state.selectedGenders);
+      if (battleType === "images") return await fetchSwissPairImages();
       return await fetchSwissPairScenes();
     }
     if (currentMode === "gauntlet") {
-      if (battleType === "performers")
-        return await fetchGauntletPairPerformers();
-      if (battleType === "images")
-        return await fetchSwissPairImages();
+      if (battleType === "performers") return await fetchGauntletPairPerformers();
+      if (battleType === "images") return await fetchSwissPairImages();
       return await fetchGauntletPairScenes();
     }
     if (currentMode === "champion") {
-      if (battleType === "performers")
-        return await fetchChampionPairPerformers();
-      if (battleType === "images")
-        return await fetchSwissPairImages();
+      if (battleType === "performers") return await fetchChampionPairPerformers();
+      if (battleType === "images") return await fetchSwissPairImages();
       return await fetchChampionPairScenes();
     }
   }
   async function loadNewPair() {
     state.disableChoice = false;
     const area = document.getElementById("hon-comparison-area");
-    if (!area)
-      return;
+    if (!area) return;
+    const undoBtn = document.getElementById("hon-undo-btn");
+    if (undoBtn) {
+      undoBtn.style.display = state.matchHistory && state.matchHistory.length > 0 ? "inline-block" : "none";
+      undoBtn.disabled = false;
+      undoBtn.textContent = "\u21A9 Undo";
+    }
     if (state.currentMode === "gauntlet" && state.battleType === "performers" && !state.gauntletChampion && !state.gauntletFalling) {
       showPerformerSelection();
       return;
@@ -1435,13 +1545,15 @@
     }
   }
   function attachBattleListeners(area) {
+    attachBattleListenersExternal(area);
+  }
+  function attachBattleListenersExternal(area) {
     area.querySelectorAll(".hon-scene-body").forEach((body) => {
       body.onclick = (e) => handleChooseItem(e);
     });
     area.querySelectorAll(".hon-scene-card").forEach((card) => {
       const video = card.querySelector(".hon-hover-preview");
-      if (!video)
-        return;
+      if (!video) return;
       card.onmouseenter = () => video.play().catch(() => {
       });
       card.onmouseleave = () => {
@@ -1454,11 +1566,7 @@
     const btn = area.querySelector("#hon-new-gauntlet");
     if (btn) {
       btn.onclick = () => {
-        state.gauntletChampion = null;
-        state.gauntletWins = 0;
-        state.gauntletDefeated = [];
-        state.gauntletFalling = false;
-        state.gauntletFallingItem = null;
+        resetBattleState();
         if (state.currentMode === "gauntlet" && state.battleType === "performers") {
           Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.showPerformerSelection());
         } else {
@@ -1482,8 +1590,7 @@
       }
     });
     const images = result.findImages.images || [];
-    if (images.length < 2)
-      return { items: await fetchRandomImages(2), ranks: [null, null] };
+    if (images.length < 2) return { items: await fetchRandomImages(2), ranks: [null, null] };
     const image1 = images[Math.floor(Math.random() * images.length)];
     const rating1 = image1.rating100 || 50;
     const matchWindow = images.length > 50 ? 10 : 20;
@@ -1499,8 +1606,7 @@
     findScenes(filter: $filter) { scenes { ${SCENE_FRAGMENT} } }
   }`, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
     const scenes = result.findScenes.scenes || [];
-    if (scenes.length < 2)
-      return { items: await fetchRandomScenes(2), ranks: [null, null] };
+    if (scenes.length < 2) return { items: await fetchRandomScenes(2), ranks: [null, null] };
     const scene1 = scenes[Math.floor(Math.random() * scenes.length)];
     const rating1 = scene1.rating100 || 50;
     const matchWindow = scenes.length > 50 ? 10 : 20;
@@ -1514,22 +1620,16 @@
   }`, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
     const scenes = result.findScenes.scenes || [];
     state.totalItemsCount = result.findScenes.count || scenes.length;
-    if (scenes.length < 2)
-      return { items: await fetchRandomScenes(2), ranks: [null, null], isVictory: false };
+    if (scenes.length < 2) return { items: await fetchRandomScenes(2), ranks: [null, null], isVictory: false };
     return handleMatchmakingLogic(scenes, "scenes");
   }
-  async function fetchChampionPairScenes() {
-    return fetchGauntletPairScenes();
-  }
   async function fetchSwissPairPerformers() {
-    const genders = state.selectedGenders;
     const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
     const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
   }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
     const performers = result.findPerformers.performers || [];
-    if (performers.length < 2)
-      return { items: await fetchRandomPerformers(2), ranks: [null, null] };
+    if (performers.length < 2) return { items: await fetchRandomPerformers(2), ranks: [null, null] };
     const weightedList = performers.map((p, idx) => ({ p, weight: getRecencyWeight(p), idx }));
     const s1 = weightedRandomSelect(weightedList, weightedList.map((item) => item.weight));
     const rating1 = s1.p.rating100 || 50;
@@ -1545,34 +1645,61 @@
   }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
     const performers = result.findPerformers.performers || [];
     state.totalItemsCount = performers.length;
-    if (performers.length < 2)
-      return { items: await fetchRandomPerformers(2), ranks: [null, null], isVictory: false };
+    if (performers.length < 2) return { items: await fetchRandomPerformers(2), ranks: [null, null], isVictory: false };
     return handleMatchmakingLogic(performers, "performers");
   }
   async function fetchChampionPairPerformers() {
-    return fetchGauntletPairPerformers();
+    const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
+    const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
+    findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
+  }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+    const performers = result.findPerformers.performers || [];
+    state.totalItemsCount = performers.length;
+    if (performers.length < 2) return { items: await fetchRandomPerformers(2), ranks: [null, null] };
+    if (!state.gauntletChampion) {
+      const shuffled = [...performers].sort(() => Math.random() - 0.5);
+      return { items: [shuffled[0], shuffled[1]], ranks: [null, null] };
+    }
+    return handleMatchmakingLogic(performers, "performers");
+  }
+  async function fetchChampionPairScenes() {
+    const result = await graphqlQuery(`query FindScenesByRating($filter: FindFilterType) {
+    findScenes(filter: $filter) { count, scenes { ${SCENE_FRAGMENT} } }
+  }`, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+    const scenes = result.findScenes.scenes || [];
+    state.totalItemsCount = result.findScenes.count || scenes.length;
+    if (scenes.length < 2) return { items: await fetchRandomScenes(2), ranks: [null, null] };
+    if (!state.gauntletChampion) {
+      const shuffled = [...scenes].sort(() => Math.random() - 0.5);
+      return { items: [shuffled[0], shuffled[1]], ranks: [null, null] };
+    }
+    return handleMatchmakingLogic(scenes, "scenes");
   }
   function handleMatchmakingLogic(list, type) {
-    if (state.gauntletFalling && state.gauntletFallingItem) {
-      const fallIdx = list.findIndex((i) => i.id === state.gauntletFallingItem.id);
-      const below = list.filter((i, idx) => idx > fallIdx && !state.gauntletDefeated.includes(i.id));
-      if (below.length === 0) {
-        return { items: [state.gauntletFallingItem], ranks: [list.length], isVictory: false, isPlacement: true, placementRank: list.length, placementRating: 1 };
-      }
-      const nextBelow = below[0];
-      return { items: [state.gauntletFallingItem, nextBelow], ranks: [fallIdx + 1, list.indexOf(nextBelow) + 1], isFalling: true };
-    }
     if (!state.gauntletChampion) {
-      const challenger = list[Math.floor(Math.random() * list.length)];
-      const lowest = [...list].sort((a, b) => (a.rating100 || 0) - (b.rating100 || 0))[0];
-      return { items: [challenger, lowest], ranks: [list.indexOf(challenger) + 1, list.indexOf(lowest) + 1], isVictory: false };
+      console.warn("[HotOrNot] No champion selected, picking a random starter.");
+      const randomStarter = list[Math.floor(Math.random() * list.length)];
+      return { items: [randomStarter, list.find((i) => i.id !== randomStarter.id)], ranks: [null, null], isVictory: false };
     }
     const champIdx = list.findIndex((i) => i.id === state.gauntletChampion.id);
-    const opponents = list.filter((i, idx) => i.id !== state.gauntletChampion.id && !state.gauntletDefeated.includes(i.id) && (idx < champIdx || (i.rating100 || 0) >= (state.gauntletChampion.rating100 || 0)));
-    if (opponents.length === 0)
+    let potentialOpponents = list.filter(
+      (item, idx) => idx < champIdx && !state.gauntletDefeated.includes(item.id) && item.id !== state.skippedId
+    );
+    if (potentialOpponents.length === 0) {
+      if (state.skippedId) {
+        state.skippedId = null;
+        return handleMatchmakingLogic(list, type);
+      }
       return { items: [state.gauntletChampion], ranks: [1], isVictory: true };
-    const nextOpponent = opponents[opponents.length - 1];
-    return { items: [state.gauntletChampion, nextOpponent], ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1], isVictory: false };
+    }
+    const proximityWindow = Math.min(5, potentialOpponents.length);
+    const randomIdx = Math.floor(Math.random() * proximityWindow);
+    const nextOpponent = potentialOpponents[potentialOpponents.length - 1 - randomIdx];
+    return {
+      items: [state.gauntletChampion, nextOpponent],
+      ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1],
+      isVictory: false
+    };
   }
   var init_battle_engine = __esm({
     "battle-engine.js"() {
@@ -1596,8 +1723,7 @@
   });
   async function openStatsModal() {
     const existingStatsModal = document.getElementById("hon-stats-modal");
-    if (existingStatsModal)
-      existingStatsModal.remove();
+    if (existingStatsModal) existingStatsModal.remove();
     const statsModal = document.createElement("div");
     statsModal.id = "hon-stats-modal";
     statsModal.className = "hon-stats-modal";
@@ -1653,8 +1779,7 @@
     const ratingBuckets = new Array(101).fill(0);
     performers.forEach((p) => {
       const r = p.rating100 ?? 50;
-      if (r >= 0 && r <= 100)
-        ratingBuckets[r]++;
+      if (r >= 0 && r <= 100) ratingBuckets[r]++;
     });
     return `
     <div class="hon-stats-header">
@@ -1735,8 +1860,7 @@
       }
       const groupMax = Math.max(...grouped.map((g) => g.count), 1);
       return grouped.map(({ label, count }) => {
-        if (count === 0)
-          return "";
+        if (count === 0) return "";
         const percentage = count / groupMax * 100;
         return `
         <div class="hon-bar-container" title="Rating ${label}: ${count} performers">
@@ -1750,8 +1874,7 @@
       }).join("");
     }
     return ratingBuckets.map((count, i) => {
-      if (count === 0)
-        return "";
+      if (count === 0) return "";
       const percentage = count / maxBucket * 100;
       return `
       <div class="hon-bar-container" title="Rating ${i}: ${count} performers">
@@ -1802,29 +1925,73 @@
   __export(ui_modal_exports, {
     addFloatingButton: () => addFloatingButton,
     closeRankingModal: () => closeRankingModal,
+    getPerformerIdFromUrl: () => getPerformerIdFromUrl,
+    isOnSinglePerformerPage: () => isOnSinglePerformerPage,
     openRankingModal: () => openRankingModal,
     shouldShowButton: () => shouldShowButton
   });
+  function getPerformerIdFromUrl() {
+    const match = window.location.pathname.match(/^\/performers\/(\d+)(?:\/|$)/);
+    return match ? match[1] : null;
+  }
+  function isOnSinglePerformerPage() {
+    return getPerformerIdFromUrl() !== null;
+  }
   function shouldShowButton() {
     const path = window.location.pathname;
-    return /^\/performers/.test(path) || /^\/images/.test(path);
+    if (path === "/performers" || path === "/performers/") return true;
+    if (path === "/images" || path === "/images/") return true;
+    return /^\/performers\/\d+(?:\/|$)/.test(path);
   }
   function addFloatingButton() {
-    if (document.getElementById("hon-floating-btn"))
+    const buttonId = "plugin_hon";
+    const existing = document.getElementById(buttonId);
+    if (!shouldShowButton()) {
+      if (existing) existing.closest(".col-4")?.remove();
       return;
-    if (!shouldShowButton())
-      return;
-    const btn = document.createElement("button");
-    btn.id = "hon-floating-btn";
-    btn.innerHTML = "\u{1F525}";
-    btn.onclick = () => window.openRankingModal();
-    btn.setAttribute("onclick", "window.openRankingModal()");
-    document.body.appendChild(btn);
+    }
+    if (existing) return;
+    const buttonContainer = document.createElement("div");
+    buttonContainer.className = "col-4 col-sm-3 col-md-2 col-lg-auto nav-link";
+    buttonContainer.innerHTML = `
+    <a href="javascript:void(0);" id="${buttonId}" class="minimal p-4 p-xl-2 d-flex d-xl-inline-block flex-column justify-content-between align-items-center btn btn-primary" title="HotOrNot">
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        viewBox="0 0 16 16" 
+        class="plugin_hon__flame svg-inline--fa fa-icon nav-menu-icon d-block d-xl-inline mb-2 mb-xl-0" 
+        fill="currentColor"
+        aria-hidden="true" 
+        focusable="false" 
+        role="img">
+        <path d="M8 0c-.2 3.5-2 5-3 6-1 1-1 3-1 4s1 3 3 3 4-1 4-3c0-2-2-3-2-5 0-1 1-2 1-2S9.5 0 8 0z"/>
+      </svg>
+      <span>HotOrNot</span>
+    </a>
+  `;
+    const button = buttonContainer.querySelector(`#${buttonId}`);
+    button.addEventListener("click", openRankingModal);
+    const navTarget2 = document.querySelector(".navbar-nav");
+    if (navTarget2) navTarget2.appendChild(buttonContainer);
+  }
+  function watchForNavigation() {
+    const observer2 = new MutationObserver(() => {
+      addFloatingButton();
+    });
+    observer2.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
   }
   function handleGlobalKeys(e) {
     const activeModal = document.getElementById("hon-modal");
     if (!activeModal) {
       document.removeEventListener("keydown", handleGlobalKeys);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      Promise.resolve().then(() => (init_match_handler(), match_handler_exports)).then((m) => m.handleUndo());
       return;
     }
     const isSpace = e.key === " " || e.code === "Space";
@@ -1847,8 +2014,7 @@
   function _buildAndOpenModal() {
     try {
       const existing = document.getElementById("hon-modal");
-      if (existing)
-        existing.remove();
+      if (existing) existing.remove();
       const modal = document.createElement("div");
       modal.id = "hon-modal";
       modal.innerHTML = `
@@ -1867,12 +2033,9 @@
           const selEl = document.getElementById("hon-performer-selection");
           const compEl = document.getElementById("hon-comparison-area");
           const actEl = document.querySelector(".hon-actions");
-          if (selEl)
-            selEl.style.display = "none";
-          if (compEl)
-            compEl.style.display = "";
-          if (actEl)
-            actEl.style.display = "";
+          if (selEl) selEl.style.display = "none";
+          if (compEl) compEl.style.display = "";
+          if (actEl) actEl.style.display = "";
           loadNewPair();
         } else {
           window.showPerformerSelection();
@@ -1925,17 +2088,28 @@
   function closeRankingModal() {
     const gameModal = document.getElementById("hon-modal");
     const statsModal = document.getElementById("hon-stats-modal");
-    if (gameModal)
-      gameModal.remove();
-    if (statsModal)
-      statsModal.remove();
+    if (gameModal) gameModal.remove();
+    if (statsModal) statsModal.remove();
     document.removeEventListener("keydown", handleGlobalKeys);
   }
+  var navTarget;
   var init_ui_modal = __esm({
     "ui-modal.js"() {
       init_state();
       init_battle_engine();
       init_ui_dashboard();
+      watchForNavigation();
+      addFloatingButton();
+      navTarget = document.querySelector(".navbar-nav");
+      if (navTarget) {
+        const observer2 = new MutationObserver(() => {
+          addFloatingButton();
+        });
+        observer2.observe(navTarget, { childList: true, subtree: true });
+      }
+      ["popstate"].forEach(
+        (event) => window.addEventListener(event, addFloatingButton)
+      );
     }
   });
 
@@ -1955,7 +2129,6 @@
           <span class="hon-mode-title">${MODE_CONFIG[mode].label}</span>
         </button>`).join("")}
     </div>` : "";
-    state.selectedGenders = ["FEMALE"];
     const genderFilterHTML = isPerformers ? `
     <div class="hon-gender-filter">
       <div class="hon-gender-btns">
@@ -1985,11 +2158,13 @@
         </div>
         <div class="hon-actions">
           <button id="hon-skip-btn" class="btn btn-secondary">Skip (Space)</button>
+          <button id="hon-undo-btn" class="btn btn-secondary" title="Undo last match (Ctrl+Z)">\u21A9 Undo</button>
         </div>
         <div class="hon-keyboard-hints">
           <span class="hon-hint"><strong>\u2B05\uFE0F</strong> Choose Left</span>
           <span class="hon-hint"><strong>\u27A1\uFE0F</strong> Choose Right</span>
           <span class="hon-hint"><strong>Space</strong> to Skip</span>
+          <span class="hon-hint"><strong>Ctrl+Z</strong> to Undo</span>
         </div>
       </div>
     </div>`;
@@ -2011,14 +2186,18 @@
         }
       };
     }
+    const undoBtn = parent.querySelector("#hon-undo-btn");
+    if (undoBtn) {
+      undoBtn.onclick = () => handleUndo();
+      undoBtn.style.display = state.matchHistory && state.matchHistory.length > 0 ? "inline-block" : "none";
+    }
     parent.querySelectorAll(".hon-gender-btn").forEach((btn) => {
       btn.addEventListener("click", () => handleGenderToggle(btn.dataset.gender));
     });
     parent.querySelectorAll(".hon-mode-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const newMode = btn.dataset.mode;
-        if (state.currentMode === newMode)
-          return;
+        if (state.currentMode === newMode) return;
         state.currentMode = newMode;
         const { getPerformerIdFromUrl: getPerformerIdFromUrl2 } = await Promise.resolve().then(() => (init_ui_modal(), ui_modal_exports));
         const urlPerformerId = getPerformerIdFromUrl2();
@@ -2042,10 +2221,8 @@
           if (state.gauntletChampion) {
             const selEl = document.getElementById("hon-performer-selection");
             const compEl = document.getElementById("hon-comparison-area");
-            if (selEl)
-              selEl.style.display = "none";
-            if (compEl)
-              compEl.style.display = "";
+            if (selEl) selEl.style.display = "none";
+            if (compEl) compEl.style.display = "";
             loadNewPair();
           } else {
             window.showPerformerSelection();
@@ -2068,6 +2245,13 @@
     });
     loadNewPair();
   }
+  function setMode(mode) {
+    document.getElementById("hon-performer-selection").style.display = "none";
+    document.getElementById("hon-comparison-area").style.display = "none";
+    if (mode === "gauntlet") {
+      Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.showPerformerSelection());
+    }
+  }
   var init_ui_dashboard = __esm({
     "ui-dashboard.js"() {
       init_state();
@@ -2078,7 +2262,7 @@
   });
 
   // ui-badge.js
-  function isOnSinglePerformerPage() {
+  function isOnSinglePerformerPage2() {
     return window.location.pathname.includes("/performers/") && !window.location.pathname.endsWith("/performers");
   }
   function createBattleRankBadge(rank, total, rating, stats = null) {
@@ -2087,14 +2271,10 @@
     badge.id = "hon-battle-rank-badge";
     const percentile = (total - rank + 1) / total * 100;
     let tierEmoji = "\u{1F525}";
-    if (percentile >= 95)
-      tierEmoji = "\u{1F451}";
-    else if (percentile >= 80)
-      tierEmoji = "\u{1F947}";
-    else if (percentile >= 60)
-      tierEmoji = "\u{1F948}";
-    else if (percentile >= 40)
-      tierEmoji = "\u{1F949}";
+    if (percentile >= 95) tierEmoji = "\u{1F451}";
+    else if (percentile >= 80) tierEmoji = "\u{1F947}";
+    else if (percentile >= 60) tierEmoji = "\u{1F948}";
+    else if (percentile >= 40) tierEmoji = "\u{1F949}";
     let matchStatsHTML = "";
     let winRate = "0.0";
     const hasMatchStats = stats && stats.total_matches > 0;
@@ -2140,11 +2320,9 @@ Match Stats:`;
         tooltipText += `
 \u2022 Current Streak: ${streakType} ${Math.abs(stats.current_streak)}`;
       }
-      if (stats.best_streak > 0)
-        tooltipText += `
+      if (stats.best_streak > 0) tooltipText += `
 \u2022 Best Streak: ${stats.best_streak}`;
-      if (stats.worst_streak < 0)
-        tooltipText += `
+      if (stats.worst_streak < 0) tooltipText += `
 \u2022 Worst Streak: ${Math.abs(stats.worst_streak)}`;
     }
     badge.title = tooltipText;
@@ -2153,12 +2331,10 @@ Match Stats:`;
   async function injectBattleRankBadge() {
     const pathParts = window.location.pathname.split("/");
     const pIndex = pathParts.indexOf("performers");
-    if (pIndex === -1 || !pathParts[pIndex + 1])
-      return;
+    if (pIndex === -1 || !pathParts[pIndex + 1]) return;
     const performerId = pathParts[pIndex + 1];
     setTimeout(async () => {
-      if (window._honBadgeInjectionInProgress)
-        return;
+      if (window._honBadgeInjectionInProgress) return;
       window._honBadgeInjectionInProgress = true;
       try {
         const ratingEl = document.querySelector(".quality-group");
@@ -2181,8 +2357,7 @@ Match Stats:`;
   }
   function showPlacementScreen2(item, rank, finalRating, battleType, totalItemsCount) {
     const area = document.getElementById("hon-comparison-area");
-    if (!area)
-      return;
+    if (!area) return;
     let title, imagePath;
     if (battleType === "performers") {
       title = item.name || `Performer #${item.id}`;
@@ -2212,16 +2387,14 @@ Match Stats:`;
   `;
     document.getElementById("hon-gauntlet-status")?.remove();
     const actionsEl = document.querySelector(".hon-actions");
-    if (actionsEl)
-      actionsEl.style.display = "none";
+    if (actionsEl) actionsEl.style.display = "none";
     state.gauntletFalling = false;
     state.gauntletFallingItem = null;
     state.gauntletChampion = null;
     state.gauntletWins = 0;
     state.gauntletDefeated = [];
     area.querySelector("#hon-new-gauntlet")?.addEventListener("click", () => {
-      if (actionsEl)
-        actionsEl.style.display = "";
+      if (actionsEl) actionsEl.style.display = "";
       loadNewPair();
     });
   }
@@ -2263,6 +2436,31 @@ Match Stats:`;
   });
 
   // ui-manager.js
+  var ui_manager_exports = {};
+  __export(ui_manager_exports, {
+    addFloatingButton: () => addFloatingButton,
+    attachEventListeners: () => attachEventListeners,
+    closeRankingModal: () => closeRankingModal,
+    createBattleRankBadge: () => createBattleRankBadge,
+    createImageCard: () => createImageCard,
+    createMainUI: () => createMainUI,
+    createPerformerCard: () => createPerformerCard,
+    createSceneCard: () => createSceneCard,
+    createStatsModalContent: () => createStatsModalContent,
+    createVictoryScreen: () => createVictoryScreen,
+    generateBarGroups: () => generateBarGroups,
+    generateStatTables: () => generateStatTables,
+    handleGenderToggle: () => handleGenderToggle,
+    injectBattleRankBadge: () => injectBattleRankBadge,
+    isOnSinglePerformerPage: () => isOnSinglePerformerPage2,
+    openRankingModal: () => openRankingModal,
+    openStatsModal: () => openStatsModal,
+    renderCard: () => renderCard,
+    setMode: () => setMode,
+    shouldShowButton: () => shouldShowButton,
+    showPlacementScreen: () => showPlacementScreen2,
+    showRatingAnimation: () => showRatingAnimation
+  });
   var init_ui_manager = __esm({
     "ui-manager.js"() {
       init_ui_cards();
@@ -2288,6 +2486,60 @@ Match Stats:`;
   window.showPerformerSelection = showPerformerSelection;
   window.handleChooseItem = handleChooseItem;
   var lastPath = "";
+  function parseGendersFromCurrentUrl() {
+    try {
+      let normalizeGender = function(raw) {
+        const key = String(raw).toLowerCase().trim();
+        if (Object.values(LABEL_TO_ENUM).includes(raw.toUpperCase())) return raw.toUpperCase();
+        return LABEL_TO_ENUM[key] || raw.toUpperCase().replace(/[\s-]+/g, "_");
+      };
+      const urlParams = new URLSearchParams(window.location.search);
+      const criteriaParams = urlParams.getAll("c");
+      if (!criteriaParams.length) return null;
+      const LABEL_TO_ENUM = {
+        "female": "FEMALE",
+        "male": "MALE",
+        "transgender male": "TRANSGENDER_MALE",
+        "transgender female": "TRANSGENDER_FEMALE",
+        "trans male": "TRANSGENDER_MALE",
+        "trans female": "TRANSGENDER_FEMALE",
+        "intersex": "INTERSEX",
+        "non-binary": "NON_BINARY",
+        "nonbinary": "NON_BINARY",
+        "non_binary": "NON_BINARY"
+      };
+      for (const param of criteriaParams) {
+        let raw = decodeURIComponent(param).trim();
+        raw = raw.replace(/^\(/, "{").replace(/\)$/, "}");
+        let criterion;
+        try {
+          criterion = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (criterion.type !== "gender") continue;
+        const val = criterion.value;
+        if (!val) continue;
+        const arr = Array.isArray(val) ? val : [val];
+        const enums = arr.map(normalizeGender).filter(Boolean);
+        if (enums.length > 0) return enums;
+      }
+      return null;
+    } catch (e) {
+      console.warn("[HotOrNot] parseGendersFromCurrentUrl error:", e);
+      return null;
+    }
+  }
+  function syncGendersFromPerformersPage() {
+    const path = window.location.pathname;
+    const isListPage = path === "/performers" || path === "/performers/";
+    if (!isListPage) return;
+    const detectedGenders = parseGendersFromCurrentUrl();
+    if (detectedGenders && detectedGenders.length > 0) {
+      state.selectedGenders = detectedGenders;
+      console.log("[HotOrNot] Auto-synced genders from URL filter:", state.selectedGenders);
+    }
+  }
   var observer = new MutationObserver(() => {
     const currentPath = window.location.pathname;
     const existingBtn = document.getElementById("hon-floating-btn");
@@ -2298,7 +2550,7 @@ Match Stats:`;
     } else if (shouldShowButton()) {
       addFloatingButton();
     }
-    if (isOnSinglePerformerPage()) {
+    if (isOnSinglePerformerPage2()) {
       const badgeExists = !!document.getElementById("hon-battle-rank-badge");
       if (currentPath !== lastPath || !badgeExists) {
         lastPath = currentPath;
@@ -2316,22 +2568,26 @@ Match Stats:`;
     }
   });
   function main() {
-    if (window.honLoaded)
-      return;
+    if (window.honLoaded) return;
     window.honLoaded = true;
     console.log("[HotOrNot] Global Scope Initialized");
     observer.observe(document.body, {
       childList: true,
       subtree: true
     });
-    if (isOnSinglePerformerPage()) {
+    if (isOnSinglePerformerPage2()) {
       setTimeout(() => injectBattleRankBadge(), 1e3);
     }
+    syncGendersFromPerformersPage();
     if (typeof PluginApi !== "undefined" && PluginApi.Event?.addEventListener) {
       PluginApi.Event.addEventListener("stash:location", (e) => {
         const path = e.detail?.data?.location?.pathname || "";
         if (path.includes("/performers")) {
           state.cachedUrlFilter = getUrlPerformerFilter();
+        }
+        const isListPage = path === "/performers" || path === "/performers/";
+        if (isListPage) {
+          setTimeout(syncGendersFromPerformersPage, 100);
         }
       });
     }

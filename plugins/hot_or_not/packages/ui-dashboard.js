@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { ALL_GENDERS } from './constants.js';
 import { loadNewPair } from './battle-engine.js';
-import { handleSkip } from './match-handler.js';
+import { handleSkip, handleUndo } from './match-handler.js';
 
 /**
  * ============================================
@@ -27,7 +27,9 @@ export function createMainUI() {
         </button>`).join('')}
     </div>` : '';
 
-state.selectedGenders = ["FEMALE"];
+  // Do NOT reset selectedGenders here — it is managed by main.js (synced from URL)
+  // and state.js (default: ["FEMALE"]). Resetting on every UI render would stomp
+  // on the auto-detected filter.
 
   const genderFilterHTML = isPerformers ? `
     <div class="hon-gender-filter">
@@ -59,11 +61,13 @@ state.selectedGenders = ["FEMALE"];
         </div>
         <div class="hon-actions">
           <button id="hon-skip-btn" class="btn btn-secondary">Skip (Space)</button>
+          <button id="hon-undo-btn" class="btn btn-secondary" title="Undo last match (Ctrl+Z)">↩ Undo</button>
         </div>
         <div class="hon-keyboard-hints">
           <span class="hon-hint"><strong>⬅️</strong> Choose Left</span>
           <span class="hon-hint"><strong>➡️</strong> Choose Right</span>
           <span class="hon-hint"><strong>Space</strong> to Skip</span>
+          <span class="hon-hint"><strong>Ctrl+Z</strong> to Undo</span>
         </div>
       </div>
     </div>`;
@@ -96,6 +100,14 @@ if (skipBtn) {
     }
   };
 }
+
+  // 3b. Undo Button
+  const undoBtn = parent.querySelector("#hon-undo-btn");
+  if (undoBtn) {
+    undoBtn.onclick = () => handleUndo();
+    // Show/hide based on whether there's history to undo
+    undoBtn.style.display = (state.matchHistory && state.matchHistory.length > 0) ? 'inline-block' : 'none';
+  }
   // 4. Gender Toggles
   parent.querySelectorAll(".hon-gender-btn").forEach(btn => {
     btn.addEventListener("click", () => handleGenderToggle(btn.dataset.gender));

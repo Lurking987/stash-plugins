@@ -18,7 +18,7 @@ export const state = {
   gauntletChampion: null,
   gauntletWins: 0,
   gauntletChampionRank: 0,
-  gauntletDefeated: [],
+  gauntletDefeated: [],       // tracks defeated opponents in the current climb (shared by gauntlet + champion)
   gauntletFalling: false,
   gauntletFallingItem: null,
   
@@ -26,7 +26,13 @@ export const state = {
   cachedUrlFilter: null,
   badgeInjectionInProgress: false,
   pluginConfigCache: null,
-  selectedGenders: ["FEMALE"]
+  selectedGenders: ["FEMALE"],
+
+  // Undo history — each entry stores enough to reverse a match
+  matchHistory: [],
+
+  // Skip tracking
+  skippedId: null
 };
 
 /**
@@ -40,4 +46,6 @@ export function resetBattleState() {
   state.gauntletFalling = false;
   state.gauntletFallingItem = null;
   state.gauntletChampionRank = 0;
+  state.matchHistory = [];
+  state.skippedId = null;
 }

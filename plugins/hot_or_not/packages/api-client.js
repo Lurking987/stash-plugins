@@ -1,5 +1,5 @@
 import { getPerformerFilter } from './parsers.js';
-import { parsePerformerEloData, updatePerformerStats, getKFactor, isActiveParticipant } from './math-utils.js';
+import { parsePerformerEloData, updatePerformerStats, getKFactor, isActiveParticipant, calculateMatchOutcome } from './math-utils.js';
 import { state } from './state.js';
 
 /**
@@ -104,12 +104,10 @@ export async function fetchRandomImages(count = 2) {
   return shuffled.slice(0, 2);
 }
 
-// ... include your fetchRandomPerformers, fetchImageCount, and fetchRandomImages here
 export async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null, isDraw = false) {
     const winnerRating = winnerCurrentRating || 50;
     const loserRating = loserCurrentRating || 50;
-    const ratingDiff = loserRating - winnerRating;
-    
+
     let freshWinnerObj = winnerObj;
     let freshLoserObj = loserObj;
     
@@ -136,58 +134,34 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
 
     // 3. ELO CALCULATIONS
     if (isDraw) {
-      // --- DRAW LOGIC (Swiss Only) ---
-      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-      const expectedLoser = 1 - expectedWinner;
+      // Draw: symmetric adjustment toward expected score
+      const ratingDiff2 = loserRating - winnerRating;
+      const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff2 / 400));
       const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
-      const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
-
+      const loserK  = getKFactor(loserRating,  loserMatchCount,  "swiss");
       winnerGain = Math.round(winnerK * (0.5 - expectedWinner));
-      loserLoss = Math.round(loserK * (expectedLoser - 0.5)); 
+      loserLoss  = Math.round(loserK  * ((1 - expectedWinner) - 0.5));
     } else {
-      // --- WIN/LOSS LOGIC ---
-      if (state.currentMode === "gauntlet") {
-        const isChampionWinner = state.gauntletChampion && winnerId === state.gauntletChampion.id;
-        const isFallingWinner = state.gauntletFalling && state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
-        const isChampionLoser = state.gauntletChampion && loserId === state.gauntletChampion.id;
-        const isFallingLoser = state.gauntletFalling && state.gauntletFallingItem && loserId === state.gauntletFallingItem.id;
-        
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
-        
-        if (isChampionWinner || isFallingWinner) {
-          winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
-        }
-        if (isChampionLoser || isFallingLoser) {
-          loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
-        }
-        if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
-          loserLoss = 1;
-        }
-      } else if (state.currentMode === "champion") {
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const winnerK = getKFactor(winnerRating, winnerMatchCount, "champion");
-        const loserK = getKFactor(loserRating, loserMatchCount, "champion");
-        
-        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
-      } else {
-        // Swiss Mode Default
-        const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-        const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
-        const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
-        
-        winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-        loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
-      }
+      const isChampionWinner = !!state.gauntletChampion && winnerId === state.gauntletChampion.id;
+      const isFallingWinner  = state.gauntletFalling && !!state.gauntletFallingItem && winnerId === state.gauntletFallingItem.id;
+      const isChampionLoser  = !!state.gauntletChampion && loserId  === state.gauntletChampion.id;
+      const isFallingLoser   = state.gauntletFalling && !!state.gauntletFallingItem && loserId  === state.gauntletFallingItem.id;
+
+      ({ winnerGain, loserLoss } = calculateMatchOutcome({
+        winnerRating, loserRating,
+        mode: state.currentMode,
+        winnerMatchCount, loserMatchCount,
+        isChampionWinner, isFallingWinner,
+        isChampionLoser,  isFallingLoser,
+        loserRank
+      }));
     }
     
     // 4. Finalize Ratings
     const newWinnerRating = Math.min(100, Math.max(1, winnerRating + winnerGain));
     const newLoserRating = Math.min(100, Math.max(1, loserRating - loserLoss));
     
-    // 5. Determine if we should update full stats (History) or just the Rating
-    const winnerRankAtStart = winnerId === state.currentPair.left?.id ? state.currentRanks.left : state.currentRanks.right;
+    // 5. Determine if we should update full stats or just the Rating
     const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
     
     const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
@@ -196,6 +170,35 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     // Winner Status: true = win, false = loss, null = draw
     const winnerStatus = isDraw ? null : true;
     const loserStatus = isDraw ? null : false;
+
+    // 5b. Save undo snapshot BEFORE writing to DB
+    const winnerOldStats = shouldTrackWinner && freshWinnerObj ? parsePerformerEloData(freshWinnerObj) : null;
+    const loserOldStats  = shouldTrackLoser  && freshLoserObj  ? parsePerformerEloData(freshLoserObj)  : null;
+    if (!state.matchHistory) state.matchHistory = [];
+    state.matchHistory.push({
+      winnerId,
+      loserId,
+      winnerOldRating: winnerRating,
+      loserOldRating:  loserRating,
+      winnerOldStats,
+      loserOldStats,
+      // Full pair snapshot so undo can re-render exact previous matchup
+      pairSnapshot: {
+        left:      state.currentPair.left  ? { ...state.currentPair.left }  : null,
+        right:     state.currentPair.right ? { ...state.currentPair.right } : null,
+        rankLeft:  state.currentRanks.left,
+        rankRight: state.currentRanks.right,
+      },
+      gauntletSnapshot: {
+        gauntletChampion:    state.gauntletChampion    ? { ...state.gauntletChampion } : null,
+        gauntletWins:        state.gauntletWins,
+        gauntletDefeated:    [...(state.gauntletDefeated || [])],
+        gauntletFalling:     state.gauntletFalling,
+        gauntletFallingItem: state.gauntletFallingItem ? { ...state.gauntletFallingItem } : null,
+      }
+    });
+    // Keep history bounded to last 10 matches
+    if (state.matchHistory.length > 10) state.matchHistory.shift();
 
     // 6. SINGLE SOURCE OF TRUTH: Update Database
     // Update Winner
@@ -328,7 +331,70 @@ export async function updateImageRating(id, rating) {
 
 /**
  * ============================================
- * 5. CONFIGURATION SERVICES
+ * 5. UNDO LAST MATCH
+ * ============================================
+ */
+/**
+ * Reverses the most recent match by restoring pre-match ratings and stats.
+ * Returns the saved pairSnapshot so the caller can re-render it directly,
+ * or null if nothing to undo.
+ */
+export async function undoLastMatch() {
+  if (!state.matchHistory || state.matchHistory.length === 0) return null;
+
+  const last = state.matchHistory.pop();
+
+  // Restore DB ratings/stats
+  await updateItemRatingDirect(last.winnerId, last.winnerOldRating, last.winnerOldStats);
+  await updateItemRatingDirect(last.loserId,  last.loserOldRating,  last.loserOldStats);
+
+  // Restore gauntlet/champion state
+  if (last.gauntletSnapshot) {
+    const snap = last.gauntletSnapshot;
+    state.gauntletChampion    = snap.gauntletChampion;
+    state.gauntletWins        = snap.gauntletWins;
+    state.gauntletDefeated    = [...snap.gauntletDefeated];
+    state.gauntletFalling     = snap.gauntletFalling;
+    state.gauntletFallingItem = snap.gauntletFallingItem;
+  }
+
+  // Restore in-memory ratings on the pair objects
+  if (last.pairSnapshot) {
+    const { left, right } = last.pairSnapshot;
+    if (left)  left.rating100  = last.winnerId === left.id  ? last.winnerOldRating : last.loserOldRating;
+    if (right) right.rating100 = last.winnerId === right.id ? last.winnerOldRating : last.loserOldRating;
+    state.currentPair  = { left, right };
+    state.currentRanks = { left: last.pairSnapshot.rankLeft, right: last.pairSnapshot.rankRight };
+  }
+
+  return last.pairSnapshot || null;
+}
+
+/**
+ * Writes a pre-computed rating and stats snapshot straight to the DB (used by undo).
+ * Bypasses ELO recalculation entirely.
+ */
+async function updateItemRatingDirect(itemId, rating, statsObj) {
+  if (state.battleType === "performers") {
+    // Pass won=undefined so updatePerformerRating skips stat recalculation,
+    // then overwrite custom_fields with the saved snapshot if we have one.
+    await updatePerformerRating(itemId, rating, null, undefined);
+    if (statsObj) {
+      await graphqlQuery(`
+        mutation($id: ID!, $fields: Map) {
+          performerUpdate(input: { id: $id, custom_fields: { partial: $fields } }) { id }
+        }`, { id: itemId, fields: { hotornot_stats: JSON.stringify(statsObj) } });
+    }
+  } else if (state.battleType === "images") {
+    await updateImageRating(itemId, rating);
+  } else {
+    await updateSceneRating(itemId, rating);
+  }
+}
+
+/**
+ * ============================================
+ * 6. CONFIGURATION SERVICES
  * ============================================
  */
 let pluginConfigCache = null;
@@ -347,7 +413,7 @@ export async function isBattleRankBadgeEnabled() {
 
 /**
  * ============================================
- * 6. CALCULATE RANK LOCALLY
+ * 7. CALCULATE RANK LOCALLY
  * ============================================
  */
 export async function getPerformerBattleRank(performerId) {

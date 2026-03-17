@@ -1,15 +1,11 @@
 import { 
   graphqlQuery, SCENE_FRAGMENT, PERFORMER_FRAGMENT, IMAGE_FRAGMENT,
-  fetchRandomScenes, fetchRandomPerformers, fetchRandomImages, fetchImageCount,
-  updatePerformerRating, updateSceneRating, updateImageRating 
+  fetchRandomScenes, fetchRandomPerformers, fetchRandomImages, fetchImageCount
 } from './api-client.js';
 import { getRecencyWeight, weightedRandomSelect } from './math-utils.js';
-import { getPerformerFilterForGender, getPerformerFilter } from './parsers.js';
-import { state } from './state.js';
-import { 
-  createSceneCard, createPerformerCard, createImageCard, 
-  createVictoryScreen, renderCard 
-} from './ui-manager.js';
+import { getPerformerFilter } from './parsers.js';
+import { state, resetBattleState } from './state.js';
+import { createVictoryScreen, renderCard } from './ui-manager.js';
 import { showPerformerSelection, showPlacementScreen } from './gauntlet-selection.js';
 import { handleChooseItem } from './match-handler.js';
 
@@ -17,7 +13,7 @@ import { handleChooseItem } from './match-handler.js';
  * BATTLE DISPATCHER (The "Brain")
  */
 export async function fetchPair() {
-  const { battleType, currentMode, selectedGenders } = state;
+  const { battleType, currentMode } = state;
 
   if (currentMode === "swiss") {
     if (battleType === "performers") return await fetchSwissPairPerformers(state.selectedGenders);
@@ -46,6 +42,14 @@ export async function loadNewPair() {
   state.disableChoice = false;
   const area = document.getElementById("hon-comparison-area");
   if (!area) return;
+
+  // Refresh undo button visibility based on current history
+  const undoBtn = document.getElementById("hon-undo-btn");
+  if (undoBtn) {
+    undoBtn.style.display = (state.matchHistory && state.matchHistory.length > 0) ? 'inline-block' : 'none';
+    undoBtn.disabled = false;
+    undoBtn.textContent = "↩ Undo";
+  }
 
   if (state.currentMode === "gauntlet" && state.battleType === "performers" && !state.gauntletChampion && !state.gauntletFalling) {
     showPerformerSelection();
@@ -88,6 +92,10 @@ export async function loadNewPair() {
 }
 
 function attachBattleListeners(area) {
+  attachBattleListenersExternal(area);
+}
+
+export function attachBattleListenersExternal(area) {
   area.querySelectorAll(".hon-scene-body").forEach(body => {
     body.onclick = (e) => handleChooseItem(e);
   });
@@ -104,12 +112,7 @@ function attachVictoryHandlers(area) {
   const btn = area.querySelector("#hon-new-gauntlet");
   if (btn) {
     btn.onclick = () => {
-      state.gauntletChampion = null;
-      state.gauntletWins = 0;
-      state.gauntletDefeated = [];
-      state.gauntletFalling = false;
-      state.gauntletFallingItem = null;
-      // Return to performer selection instead of jumping straight into a match
+      resetBattleState();
       if (state.currentMode === "gauntlet" && state.battleType === "performers") {
         import('./gauntlet-selection.js').then(m => m.showPerformerSelection());
       } else {
@@ -193,10 +196,6 @@ export async function fetchGauntletPairScenes() {
   return handleMatchmakingLogic(scenes, "scenes");
 }
 
-export async function fetchChampionPairScenes() {
-  return fetchGauntletPairScenes(); // Champion mode uses same fetcher, just different rating logic in match-handler
-}
-
 /**
  * ============================================
  * PERFORMER FETCHERS
@@ -204,7 +203,6 @@ export async function fetchChampionPairScenes() {
  */
 
 export async function fetchSwissPairPerformers() {
-  const genders = state.selectedGenders;
   const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
   const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
     findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
@@ -238,13 +236,55 @@ export async function fetchGauntletPairPerformers() {
   return handleMatchmakingLogic(performers, "performers");
 }
 
+/**
+ * ============================================
+ * CHAMPION FETCHERS
+ * Same climb-toward-#1 logic as Gauntlet, but:
+ *   - Both performers receive ELO updates (at 50% K-factor per spec)
+ *   - No falling/placement on loss — the new champion inherits the climb
+ *   - gauntletDefeated persists across champion changes so the climb continues
+ * ============================================
+ */
+
 export async function fetchChampionPairPerformers() {
-  return fetchGauntletPairPerformers();
+  const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
+  const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
+    findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
+  }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+
+  const performers = result.findPerformers.performers || [];
+  state.totalItemsCount = performers.length;
+  if (performers.length < 2) return { items: await fetchRandomPerformers(2), ranks: [null, null] };
+
+  // No champion yet — start with two fully random performers regardless of rank
+  if (!state.gauntletChampion) {
+    const shuffled = [...performers].sort(() => Math.random() - 0.5);
+    return { items: [shuffled[0], shuffled[1]], ranks: [null, null] };
+  }
+
+  return handleMatchmakingLogic(performers, "performers");
+}
+
+export async function fetchChampionPairScenes() {
+  const result = await graphqlQuery(`query FindScenesByRating($filter: FindFilterType) {
+    findScenes(filter: $filter) { count, scenes { ${SCENE_FRAGMENT} } }
+  }`, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+
+  const scenes = result.findScenes.scenes || [];
+  state.totalItemsCount = result.findScenes.count || scenes.length;
+  if (scenes.length < 2) return { items: await fetchRandomScenes(2), ranks: [null, null] };
+
+  if (!state.gauntletChampion) {
+    const shuffled = [...scenes].sort(() => Math.random() - 0.5);
+    return { items: [shuffled[0], shuffled[1]], ranks: [null, null] };
+  }
+
+  return handleMatchmakingLogic(scenes, "scenes");
 }
 
 /**
  * ============================================
- * MATCHMAKING HELPERS (Gauntlet/Champion Internal)
+ * MATCHMAKING HELPERS (Gauntlet Internal)
  * ============================================
  */
 
@@ -293,6 +333,3 @@ export function handleMatchmakingLogic(list, type) {
   };
 }
 
-export function isChampionVictory(currentIndex, defeatedList, totalList) {
-  return totalList.filter((item, idx) => idx < currentIndex && !defeatedList.includes(item.id)).length === 0;
-}
