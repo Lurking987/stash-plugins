@@ -90,6 +90,14 @@ function handleGlobalKeys(e) {
     return;
   }
 
+  // Ctrl+Z — Undo last match
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    import('./match-handler.js').then(m => m.handleUndo());
+    return;
+  }
+
   const isSpace = e.key === " " || e.code === "Space";
   const hotKeys = ["ArrowLeft", "ArrowRight", ... (isSpace ? [" ", "Space"] : [])];
 
@@ -198,6 +206,8 @@ export async function openRankingModal() {
       state.battleType = path.includes('/images') ? "images" : "performers";
       state.currentMode = "swiss";
       state.gauntletChampion = null;
+      // Gender filter is synced from URL in main.js syncGendersFromPerformersPage()
+      // when the user navigates to /performers — no action needed here.
     }
 
     _buildAndOpenModal();
