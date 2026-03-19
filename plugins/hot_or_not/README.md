@@ -1,4 +1,4 @@
-# HotOrNot Plugin
+# HotOrNot_V3
 
 An ELO-based ranking system for performers in [Stash](https://stashapp.cc/). Compare performers head-to-head in an interactive battle interface to build personalized rankings based on your preferences.
 
