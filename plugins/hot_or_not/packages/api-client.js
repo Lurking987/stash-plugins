@@ -161,51 +161,91 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     const newWinnerRating = Math.min(100, Math.max(1, winnerRating + winnerGain));
     const newLoserRating = Math.min(100, Math.max(1, loserRating - loserLoss));
     
-    // 5. Determine if we should update full stats or just the Rating
-    const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
-    
-    const shouldTrackWinner = state.battleType === "performers" && (isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
-    const shouldTrackLoser = state.battleType === "performers" && (isActiveParticipant(loserId,  state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || isFirstMatchGlobal);
+// 5. Determine if we should update full stats or just the Rating
+const isFirstMatchGlobal = (state.currentMode === "gauntlet" || state.currentMode === "champion") && !state.gauntletChampion;
+
+// For gauntlet/champion modes, ALWAYS track both participants
+const shouldTrackWinner = state.battleType === "performers" && (
+    state.currentMode === "gauntlet" || 
+    state.currentMode === "champion" || 
+    isActiveParticipant(winnerId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || 
+    isFirstMatchGlobal
+);
+
+const shouldTrackLoser = state.battleType === "performers" && (
+    state.currentMode === "gauntlet" || 
+    state.currentMode === "champion" || 
+    isActiveParticipant(loserId, state.currentMode, state.gauntletChampion, state.gauntletFallingItem) || 
+    isFirstMatchGlobal
+);
     
     // Winner Status: true = win, false = loss, null = draw
     const winnerStatus = isDraw ? null : true;
     const loserStatus = isDraw ? null : false;
 
-    // 5b. Save undo snapshot BEFORE writing to DB
-    const winnerOldStats = shouldTrackWinner && freshWinnerObj ? parsePerformerEloData(freshWinnerObj) : null;
-    const loserOldStats  = shouldTrackLoser  && freshLoserObj  ? parsePerformerEloData(freshLoserObj)  : null;
-    if (!state.matchHistory) state.matchHistory = [];
-    state.matchHistory.push({
-      winnerId,
-      loserId,
-      winnerOldRating: winnerRating,
-      loserOldRating:  loserRating,
-      winnerOldStats,
-      loserOldStats,
-      // Full pair snapshot so undo can re-render exact previous matchup
-      pairSnapshot: {
-        left:      state.currentPair.left  ? { ...state.currentPair.left }  : null,
-        right:     state.currentPair.right ? { ...state.currentPair.right } : null,
-        rankLeft:  state.currentRanks.left,
-        rankRight: state.currentRanks.right,
-      },
-      gauntletSnapshot: {
-        gauntletChampion:    state.gauntletChampion    ? { ...state.gauntletChampion } : null,
-        gauntletWins:        state.gauntletWins,
-        gauntletDefeated:    [...(state.gauntletDefeated || [])],
-        gauntletFalling:     state.gauntletFalling,
-        gauntletFallingItem: state.gauntletFallingItem ? { ...state.gauntletFallingItem } : null,
-      }
-    });
+	// 5b. Save undo snapshot BEFORE writing to DB
+	// We capture a full snapshot of the stats AND the record list
+	const winnerOldStats = (shouldTrackWinner && freshWinnerObj) ? {
+		...parsePerformerEloData(freshWinnerObj),
+		performer_record: freshWinnerObj.custom_fields?.performer_record 
+	} : null;
+
+	const loserOldStats = (shouldTrackLoser && freshLoserObj) ? {
+		...parsePerformerEloData(freshLoserObj),
+		performer_record: freshLoserObj.custom_fields?.performer_record 
+	} : null;
+
+	if (!state.matchHistory) state.matchHistory = [];
+	state.matchHistory.push({
+		winnerId,
+		loserId,
+		winnerOldRating: winnerRating,
+		loserOldRating:  loserRating,
+		winnerOldStats, // This now contains the record list!
+		loserOldStats,  // This now contains the record list!
+		pairSnapshot: {
+			left:  state.currentPair.left  ? { ...state.currentPair.left }  : null,
+			right: state.currentPair.right ? { ...state.currentPair.right } : null,
+			rankLeft:  state.currentRanks.left,
+			rankRight: state.currentRanks.right,
+		},
+		gauntletSnapshot: {
+			gauntletChampion:    state.gauntletChampion    ? { ...state.gauntletChampion } : null,
+			gauntletWins:        state.gauntletWins,
+			gauntletDefeated:    [...(state.gauntletDefeated || [])],
+			gauntletFalling:     state.gauntletFalling,
+			gauntletFallingItem: state.gauntletFallingItem ? { ...state.gauntletFallingItem } : null,
+		}
+	});
     // Keep history bounded to last 10 matches
     if (state.matchHistory.length > 10) state.matchHistory.shift();
 
-    // 6. SINGLE SOURCE OF TRUTH: Update Database
-    // Update Winner
-    await updateItemRating(winnerId, newWinnerRating, shouldTrackWinner ? freshWinnerObj : null, winnerStatus);
-    // Update Loser
-    await updateItemRating(loserId, newLoserRating, shouldTrackLoser ? freshLoserObj : null, loserStatus);
-    
+
+	// 6. SINGLE SOURCE OF TRUTH: Update Database
+	// Update Winner (Opponent is loserId)
+	if (!winnerId || !loserId) {
+			console.error("[HotOrNot] Cannot update rating: One or both IDs are missing", { winnerId, loserId });
+			return { newWinnerRating, newLoserRating, winnerChange: winnerGain, loserChange: -loserLoss };
+		}
+
+    // 7. SINGLE SOURCE OF TRUTH: Update Database
+
+await updateItemRating(
+    winnerId, 
+    newWinnerRating, 
+    shouldTrackWinner ? freshWinnerObj : null, 
+    winnerStatus, 
+    loserId  // Pass the ID instead of the potentially null object
+);
+
+// Update Loser (passing freshWinnerObj as the opponent object)
+await updateItemRating(
+    loserId, 
+    newLoserRating, 
+    shouldTrackLoser ? freshLoserObj : null, 
+    loserStatus, 
+    winnerId  // Pass the ID instead of the potentially null object
+);
     return { 
         newWinnerRating, 
         newLoserRating, 
@@ -214,16 +254,16 @@ export async function handleComparison(winnerId, loserId, winnerCurrentRating, l
     };
 }
   
-export async function updateItemRating(itemId, newRating, itemObj = null, won = null) {
+export async function updateItemRating(itemId, newRating, itemObj = null, won = null, opponentId = null) {
     if (state.battleType === "performers") {
-      return await updatePerformerRating(itemId, newRating, itemObj, won);
+        // Pass opponentId through!
+        return await updatePerformerRating(itemId, newRating, itemObj, won, opponentId);
     } else if (state.battleType === "images") {
-      return await updateImageRating(itemId, newRating);
+        return await updateImageRating(itemId, newRating);
     } else {
-      return await updateSceneRating(itemId, newRating);
+        return await updateSceneRating(itemId, newRating);
     }
-  }
-  
+}
 export async function fetchRandomPerformers(count = 2) {
   // Use state.selectedGenders, NEVER just selectedGenders
   if (state.selectedGenders.length === 0) {
@@ -232,7 +272,6 @@ export async function fetchRandomPerformers(count = 2) {
   
   const battleGender = state.selectedGenders[Math.floor(Math.random() * state.selectedGenders.length)];
   
-  // FIX: Use the imported getPerformerFilter and pass the required arguments
   // We wrap battleGender in an array [battleGender] because the parser expects a list
   const performerFilter = getPerformerFilter(state.cachedUrlFilter, [battleGender]);
   
@@ -285,6 +324,7 @@ export async function fetchImageCount() {
 /**
  * Fetches all performers who have a rating to generate the stats dashboard
  */
+ 
 export async function fetchAllPerformerStats() {
   const result = await graphqlQuery(`
     query FindAllPerformers($filter: FindFilterType) {
@@ -309,25 +349,137 @@ export async function updateSceneRating(id, rating) {
   });
 }
 
-export async function updatePerformerRating(id, rating, performerObj = null, won = null) {
-  const variables = { id, rating: Math.round(rating) };
+export async function updateImageRating(id, rating) {
+  await graphqlQuery(`mutation($i: ImageUpdateInput!) { imageUpdate(input: $i) { id } }`, {
+    i: { id, rating100: Math.max(1, Math.min(100, rating)) }
+  });
+}
+
+export async function updatePerformerRating(id, rating, performerObj = null, won = null, opponentId = null) {
+  const variables = { id, rating: Math.round(rating), fields: {} };
   
-  if (performerObj && won !== undefined) {
-    const stats = updatePerformerStats(parsePerformerEloData(performerObj), won);
-    variables.fields = { hotornot_stats: JSON.stringify(stats) };
+  if (performerObj) {
+    // 1. Update Numerical Stats
+    const currentStats = parsePerformerEloData(performerObj);
+    const updatedStats = updatePerformerStats(currentStats, won);
+    variables.fields.hotornot_stats = JSON.stringify(updatedStats);
+
+    // 2. Handle Match History
+    let matchHistory = [];
+    try {
+      const rawRecord = performerObj.custom_fields?.performer_record;
+      if (rawRecord) {
+        matchHistory = typeof rawRecord === 'string' ? JSON.parse(rawRecord) : rawRecord;
+      }
+    } catch (e) {
+      matchHistory = [];
+    }
+
+    // Handle opponent data - robust logic that works with IDs or objects
+    let opponentData = "0:Unknown";
+    if (opponentId) {
+      // If opponentId is already in "ID:Name" format, use it directly
+      if (typeof opponentId === 'string' && opponentId.includes(':')) {
+        opponentData = opponentId;
+      }
+      // If opponentId is a simple ID or string ID
+      else if (typeof opponentId === 'string' || typeof opponentId === 'number') {
+        let cleanId = opponentId.toString().replace(/^.*?(\d+).*$/, '$1'); // Extract digits
+        if (cleanId && cleanId !== '0') {
+          // First, try to get name from current state context
+          let opponentName = "Unknown";
+          
+          // Check if this ID matches someone in the current pair
+          if (state.currentPair) {
+            if (state.currentPair.left && state.currentPair.left.id == cleanId) {
+              opponentName = state.currentPair.left.name || `Performer #${cleanId}`;
+            } else if (state.currentPair.right && state.currentPair.right.id == cleanId) {
+              opponentName = state.currentPair.right.name || `Performer #${cleanId}`;
+            }
+          }
+          
+          // Check if this ID matches the champion
+          if (opponentName === "Unknown" && state.gauntletChampion && state.gauntletChampion.id == cleanId) {
+            opponentName = state.gauntletChampion.name || `Performer #${cleanId}`;
+          }
+          
+          // If still unknown, try to fetch from database
+          if (opponentName === "Unknown") {
+            try {
+              const opponentPerformer = await fetchPerformerById(cleanId);
+              if (opponentPerformer) {
+                opponentName = opponentPerformer.name || `Performer #${cleanId}`;
+              }
+            } catch (e) {
+              console.warn(`[HotOrNot] Failed to fetch opponent ${cleanId}:`, e);
+            }
+          }
+          
+          opponentData = `${cleanId}:${opponentName}`;
+        }
+      }
+      // If opponentId is an object
+      else if (typeof opponentId === 'object') {
+        const oppId = opponentId.id || "0";
+        let oppName = opponentId.name || "Unknown";
+        
+        // If name is still unknown, try to get it from state
+        if (oppName === "Unknown") {
+          if (state.currentPair) {
+            if (opponentId === state.currentPair.left) {
+              oppName = state.currentPair.left.name || `Performer #${oppId}`;
+            } else if (opponentId === state.currentPair.right) {
+              oppName = state.currentPair.right.name || `Performer #${oppId}`;
+            }
+          }
+          if (oppName === "Unknown" && state.gauntletChampion && opponentId === state.gauntletChampion) {
+            oppName = state.gauntletChampion.name || `Performer #${oppId}`;
+          }
+        }
+        
+        // If still unknown, fetch from database
+        if (oppName === "Unknown" && oppId && oppId !== "0") {
+          try {
+            const opponentPerformer = await fetchPerformerById(oppId);
+            if (opponentPerformer) {
+              oppName = opponentPerformer.name || `Performer #${oppId}`;
+            }
+          } catch (e) {
+            console.warn(`[HotOrNot] Failed to fetch opponent ${oppId}:`, e);
+          }
+        }
+        
+        if (oppId && oppId !== "0") {
+          opponentData = `${oppId}:${oppName}`;
+        }
+      }
+    }
+
+    matchHistory.push({
+      date: new Date().toISOString(),
+      opponent: opponentData,
+      won: won,
+      ratingAfter: Math.round(rating)
+    });
+
+    // Keep history lean to avoid character limits
+    if (matchHistory.length > 30) matchHistory = matchHistory.slice(-30);
+    variables.fields.performer_record = JSON.stringify(matchHistory);
   }
 
   await graphqlQuery(`
     mutation($id: ID!, $rating: Int!, $fields: Map) {
-      performerUpdate(input: { id: $id, rating100: $rating, custom_fields: { partial: $fields } }) { id }
+      performerUpdate(input: { 
+        id: $id, 
+        rating100: $rating, 
+        custom_fields: { partial: $fields } 
+      }) { 
+        id 
+      }
     }`, variables);
 }
 
-export async function updateImageRating(id, rating) {
-  await graphqlQuery(`mutation($i: ImageUpdateInput!) { imageUpdate(input: $i) { id } }`, {
-    i: { id, rating100: Math.max(1, Math.min(100, Math.round(rating))) }
-  });
-}
+
 
 /**
  * ============================================
@@ -344,11 +496,12 @@ export async function undoLastMatch() {
 
   const last = state.matchHistory.pop();
 
-  // Restore DB ratings/stats
+  // 1. Restore DB ratings/stats using the snapshots we already have
+  // We pass the old stats directly so we don't have to fetch them again
   await updateItemRatingDirect(last.winnerId, last.winnerOldRating, last.winnerOldStats);
   await updateItemRatingDirect(last.loserId,  last.loserOldRating,  last.loserOldStats);
 
-  // Restore gauntlet/champion state
+  // 2. Restore gauntlet/champion state
   if (last.gauntletSnapshot) {
     const snap = last.gauntletSnapshot;
     state.gauntletChampion    = snap.gauntletChampion;
@@ -358,11 +511,9 @@ export async function undoLastMatch() {
     state.gauntletFallingItem = snap.gauntletFallingItem;
   }
 
-  // Restore in-memory ratings on the pair objects
+  // 3. Restore in-memory ratings for immediate UI feedback
   if (last.pairSnapshot) {
     const { left, right } = last.pairSnapshot;
-    if (left)  left.rating100  = last.winnerId === left.id  ? last.winnerOldRating : last.loserOldRating;
-    if (right) right.rating100 = last.winnerId === right.id ? last.winnerOldRating : last.loserOldRating;
     state.currentPair  = { left, right };
     state.currentRanks = { left: last.pairSnapshot.rankLeft, right: last.pairSnapshot.rankRight };
   }
@@ -374,17 +525,38 @@ export async function undoLastMatch() {
  * Writes a pre-computed rating and stats snapshot straight to the DB (used by undo).
  * Bypasses ELO recalculation entirely.
  */
+
 async function updateItemRatingDirect(itemId, rating, statsObj) {
   if (state.battleType === "performers") {
-    // Pass won=undefined so updatePerformerRating skips stat recalculation,
-    // then overwrite custom_fields with the saved snapshot if we have one.
-    await updatePerformerRating(itemId, rating, null, undefined);
+    const fields = {};
+
     if (statsObj) {
-      await graphqlQuery(`
-        mutation($id: ID!, $fields: Map) {
-          performerUpdate(input: { id: $id, custom_fields: { partial: $fields } }) { id }
-        }`, { id: itemId, fields: { hotornot_stats: JSON.stringify(statsObj) } });
+      // 1. Restore the numerical Elo stats
+      fields.hotornot_stats = JSON.stringify(statsObj);
+      
+      // 2. Restore the match history list (performer_record)
+      if (statsObj.performer_record) {
+        fields.performer_record = typeof statsObj.performer_record === 'string' 
+          ? statsObj.performer_record 
+          : JSON.stringify(statsObj.performer_record);
+      }
     }
+
+    await graphqlQuery(`
+      mutation($id: ID!, $rating: Int!, $fields: Map) {
+        performerUpdate(input: { 
+          id: $id, 
+          rating100: $rating, 
+          custom_fields: { partial: $fields } 
+        }) { 
+          id 
+        }
+      }`, { 
+        id: itemId, 
+        rating: Math.round(rating), 
+        fields 
+      });
+
   } else if (state.battleType === "images") {
     await updateImageRating(itemId, rating);
   } else {
@@ -418,40 +590,36 @@ export async function isBattleRankBadgeEnabled() {
  */
 export async function getPerformerBattleRank(performerId) {
   try {
-    const result = await graphqlQuery(`
-      query GetPerformerRank($id: ID!, $filter: FindFilterType) {
-        findPerformers(filter: $filter) {
-          performers {
-            id
-            rating100
-          }
+    // 1. Get the target performer's rating first
+    const target = await fetchPerformerById(performerId);
+    if (!target || target.rating100 === null) return null;
+
+    const currentRating = target.rating100;
+
+    // 2. Count how many performers are rated higher
+    // We use a filter to only fetch the count of performers with rating > currentRating
+    const rankResult = await graphqlQuery(`
+      query GetRankCount($rating: Int!) {
+        findPerformers(performer_filter: { rating100: { value: $rating, modifier: GREATER_THAN } }) {
+          count
         }
-        findPerformer(id: $id) {
-          custom_fields
+        totalRated: findPerformers(performer_filter: { rating100: { value: 0, modifier: GREATER_THAN } }) {
+          count
         }
       }
-    `, { id: performerId, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+    `, { rating: currentRating });
 
-    const allPerformers = result?.findPerformers?.performers || [];
-    const targetPerformer = result.findPerformer;
+    const rank = (rankResult.findPerformers.count || 0) + 1;
+    const total = rankResult.totalRated.count || 0;
 
-    const ratedPerformers = allPerformers.filter(p => p.rating100 !== null);
-    const total = ratedPerformers.length;
-    const index = ratedPerformers.findIndex(p => p.id === performerId);
-
-    if (index === -1) return null;
-
+    // Parse stats from the target we already fetched
     let stats = null;
-    const statsJson = targetPerformer?.custom_fields?.["hotornot_stats"];
+    const statsJson = target.custom_fields?.["hotornot_stats"];
     if (statsJson) {
-      try {
-        stats = typeof statsJson === 'string' ? JSON.parse(statsJson) : statsJson;
-      } catch (e) {
-        console.warn("[HotOrNot] Could not parse hotornot_stats:", performerId);
-      }
+      stats = typeof statsJson === 'string' ? JSON.parse(statsJson) : statsJson;
     }
 
-    return { rank: index + 1, total, rating: ratedPerformers[index].rating100, stats };
+    return { rank, total, rating: currentRating, stats };
   } catch (err) {
     console.error("[HotOrNot] Error calculating rank:", err);
     return null;
