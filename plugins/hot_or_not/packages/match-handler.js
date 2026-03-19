@@ -35,24 +35,45 @@ export async function handleChooseItem(event) {
 
   // --- 2. GAUNTLET MODE ---
   if (state.currentMode === "gauntlet") {
-    // A. Handle "Falling" logic (finding the floor after a loss)
-    if (state.gauntletFalling && state.gauntletFallingItem) {
-      if (winnerId === state.gauntletFallingItem.id) {
-        // Falling item won! Found the floor.
-        const finalRating = Math.min(100, loserRating + 1);
-        await updateItemRating(winnerId, finalRating, winnerItem, true);
-        const finalRank = Math.max(1, (loserRank || 1) - 1);
-        
-        applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, { newWinnerRating: finalRating, newLoserRating: loserRating, winnerChange: 0, loserChange: 0 });
-        setTimeout(() => showPlacementScreen(winnerItem, finalRank, finalRating, state.battleType, state.totalItemsCount), 800);
-      } else {
-        // Falling item lost again, keep going down.
-        state.gauntletDefeated.push(winnerId);
-        await updateItemRating(state.gauntletFallingItem.id, loserRating, loserItem, false);
-        applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, { newWinnerRating: winnerRating, newLoserRating: loserRating, winnerChange: 0, loserChange: 0 });
-      }
-      return;
-    }
+	// A. Handle "Falling" logic (finding the floor after a loss)
+	if (state.gauntletFalling && state.gauntletFallingItem) {
+	  if (winnerId === state.gauntletFallingItem.id) {
+		// Falling item won! Found the floor.
+		const finalRating = Math.min(100, loserRating + 1);
+		// FIX: Use handleComparison instead of updateItemRating directly
+		await handleComparison(
+		  winnerId, // falling item (now winner)
+		  loserId,  // the opponent they beat
+		  winnerRating, 
+		  loserRating, 
+		  null, // no rank for placement matches
+		  winnerItem, 
+		  loserItem, 
+		  false // not a draw
+		);
+		const finalRank = Math.max(1, (loserRank || 1) - 1);
+		
+		applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, { newWinnerRating: finalRating, newLoserRating: loserRating, winnerChange: 0, loserChange: 0 });
+		setTimeout(() => showPlacementScreen(winnerItem, finalRank, finalRating, state.battleType, state.totalItemsCount), 800);
+	  } else {
+		// Falling item lost again, keep going down.
+		state.gauntletDefeated.push(winnerId);
+		// FIX: Use handleComparison instead of updateItemRating directly
+		const outcome = await handleComparison(
+		  winnerId, // winner (the challenger)
+		  state.gauntletFallingItem.id, // loser (the falling item)
+		  winnerRating, 
+		  loserRating, 
+		  null, // no rank for falling matches
+		  winnerItem, 
+		  loserItem, // loserItem is the falling item
+		  false // not a draw
+		);
+		applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome);
+	  }
+	  return;
+	}
+
 
     // B. Normal Gauntlet Climbing
     const outcome = await handleComparison(winnerId, loserId, winnerRating, loserRating, loserRank, winnerItem, loserItem);

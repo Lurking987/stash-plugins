@@ -1,6 +1,6 @@
 name: HotOrNot_V3
 description: Adds an ELO based ranking system for performers and images
-version: 3.0.0
+version: 3.1.0
 url: https://github.com/Lurking987/stash-plugins/pull/5
 ui: 
   javascript:

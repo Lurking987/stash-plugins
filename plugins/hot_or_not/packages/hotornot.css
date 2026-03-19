@@ -822,7 +822,7 @@
 /* End shim */
 
 /* ============================================
-   PERFORMER SELECTION FOR GAUNTLET
+   PERFORMER SELECTION FOR GAUNTLET - SMOOTH & INSTANT VERSION
    ============================================ */
 
 .hon-performer-selection {
@@ -846,60 +846,69 @@
   text-align: center;
 }
 
-.hon-performer-list {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 40px;  /* extra breathing room for scale(1.25) overflow */
+#hon-performer-list {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 25px !important;
   width: 100%;
-  padding: 12px 6px;
+  padding: 20px 6px !important;
 }
 
-/* +25% size: scale the entire card uniformly */
-.hon-performer-list .hon-selection-card {
-  transform: scale(1.25);
-  transform-origin: center center;
-}
-
-/* Text sizing stays proportional via inheritance */
-.hon-performer-list .hon-selection-name {
-  font-size: 0.95rem;
-}
-
-.hon-performer-list .hon-selection-rating {
-  font-size: 0.85rem;
-}
-
+/* Selection card styling - SMOOTH & INSTANT HOVER */
 .hon-selection-card {
   background: #252525;
   border: 2px solid #444;
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
   cursor: pointer;
-  transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
+  transform-origin: center center;
+  
+  /* Instant smooth transitions */
+  transition: 
+    transform 0.2s ease-out,
+    border-color 0.2s ease-out,
+    box-shadow 0.2s ease-out,
+    z-index 0s ease-out 0s;
+  
 }
 
+/* INSTANT & SMOOTH Hover effects - Entire card pops together */
 .hon-selection-card:hover {
+  transform: scale(1.05) translateY(-8px);
   border-color: #0d6efd;
-  transform: translateY(-5px);
-  box-shadow: 0 8px 20px rgba(13, 110, 253, 0.3);
+  box-shadow: 0 15px 30px rgba(13, 110, 253, 0.4);
+  animation: none;
+  z-index: 20;
 }
 
 .hon-selection-image-container {
   width: 100%;
   aspect-ratio: 2/3;
-  overflow: hidden;
+  overflow: visible;
   background: #333;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  border-radius: 8px 8px 0 0;
 }
 
 .hon-selection-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 8px 8px 0 0;
+  /* Match card transition speed */
+  transition: transform 0.2s ease-out;
+}
+
+/* No separate image scaling since we scale the whole card */
+.hon-selection-card:hover .hon-selection-image {
+  transform: none;
 }
 
 .hon-selection-image.hon-no-image {
@@ -908,18 +917,28 @@
   justify-content: center;
   color: #888;
   font-size: 0.9rem;
+  width: 100%;
+  height: 100%;
 }
 
 .hon-selection-info {
-  padding: 10px;
+  padding: 12px;
   text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #252525;
+  border-radius: 0 0 8px 8px;
+  position: relative;
+  z-index: 3;
 }
 
 .hon-selection-name {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: bold;
   color: #fff;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -930,13 +949,22 @@
   color: #888;
 }
 
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  #hon-performer-list {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 20px !important;
+  }
+}
+
 @media (max-width: 800px) {
-  .hon-performer-list {
-    grid-template-columns: repeat(3, 1fr);
+  #hon-performer-list {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 15px !important;
   }
   
   .hon-selection-name {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
   }
   
   .hon-selection-rating {
@@ -1654,30 +1682,24 @@
     box-shadow: 0 0 20px rgba(0,0,0,0.5);
 }
 
-#hon-performer-list {
-  display: grid !important;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-  gap: 40px !important;
-  width: 100%;
-  padding: 12px 6px;
-}
-
-/* Let the aspect-ratio on .hon-selection-image-container control height naturally */
-#hon-performer-list img {
-  width: 100%;
-  object-fit: cover;
-}
-
-/* Scale applied via .hon-performer-list .hon-selection-card above */
-#hon-performer-list .hon-selection-card {
-  transform: scale(1.25) !important;
-  transform-origin: center center !important;
-}
-
 
 .quality-group {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.hon-keyboard-hints {
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 10px;
+}
+
+.hon-hint {
+  display: inline-block;
+  margin: 0 5px;
 }

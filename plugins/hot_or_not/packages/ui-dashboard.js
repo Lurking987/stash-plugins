@@ -68,6 +68,7 @@ export function createMainUI() {
           <span class="hon-hint"><strong>➡️</strong> Choose Right</span>
           <span class="hon-hint"><strong>Space</strong> to Skip</span>
           <span class="hon-hint"><strong>Ctrl+Z</strong> to Undo</span>
+		  <span class="hon-hint"><strong>ESC</strong> to Exit</span>
         </div>
       </div>
     </div>`;

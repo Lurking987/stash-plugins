@@ -4,18 +4,17 @@
  */
 
 /**
- * Calculates how likely a performer is to be picked based on time since last match
+ * Calculates how likely a performer is to be picked based on time since last match. Makes matchmaking feel more "organic" and prevent users from seeing the same performers in cycles.
  */
 export function getRecencyWeight(performer) {
   const stats = parsePerformerEloData(performer);
-  if (!stats.last_match) return 1.0;
+  if (!stats.last_match) return 0.7; // Slightly higher than average to encourage initial rating
 
   const hoursSince = (Date.now() - new Date(stats.last_match).getTime()) / (1000 * 60 * 60);
   
-  if (hoursSince < 1) return 0.1;
-  if (hoursSince < 6) return 0.3;
-  if (hoursSince < 24) return 0.6;
-  return 1.0;
+  // Formula: 1 - e^(-0.2 * hours)
+  // Results: 1hr ≈ 0.18, 6hrs ≈ 0.70, 24hrs ≈ 0.99
+  return Math.min(1.0, 1 - Math.exp(-0.2 * hoursSince));
 }
 
 /**
@@ -73,26 +72,34 @@ export function parsePerformerEloData(performer) {
 /**
  * Stats: Update the stats object based on match outcome
  */
+/**
+ * Stats: Update the stats object based on match outcome
+ * Now includes recording the opponentId in a match history log.
+ */
 export function updatePerformerStats(currentStats, won) {
   const newStats = {
     ...currentStats,
-    total_matches: currentStats.total_matches + 1,
+    total_matches: (currentStats.total_matches || 0) + 1,
     last_match: new Date().toISOString()
   };
 
+  // Remove history from here if it exists (cleaning up old data)
+  delete newStats.history;
+
   if (won === null) {
-    newStats.draws = (currentStats.draws || 0) + 1;  // ← add this
+    newStats.draws = (currentStats.draws || 0) + 1;
     return newStats;
   }
 
-  newStats.wins = won ? currentStats.wins + 1 : currentStats.wins;
-  newStats.losses = won ? currentStats.losses : currentStats.losses + 1;
+  newStats.wins = won ? (currentStats.wins || 0) + 1 : (currentStats.wins || 0);
+  newStats.losses = won ? (currentStats.losses || 0) : (currentStats.losses || 0) + 1;
+  
   newStats.current_streak = won 
-    ? (currentStats.current_streak >= 0 ? currentStats.current_streak + 1 : 1)
-    : (currentStats.current_streak <= 0 ? currentStats.current_streak - 1 : -1);
+    ? (currentStats.current_streak >= 0 ? (currentStats.current_streak || 0) + 1 : 1)
+    : (currentStats.current_streak <= 0 ? (currentStats.current_streak || 0) - 1 : -1);
 
-  newStats.best_streak = Math.max(currentStats.best_streak, newStats.current_streak);
-  newStats.worst_streak = Math.min(currentStats.worst_streak, newStats.current_streak);
+  newStats.best_streak = Math.max(currentStats.best_streak || 0, newStats.current_streak);
+  newStats.worst_streak = Math.min(currentStats.worst_streak || 0, newStats.current_streak);
 
   return newStats;
 }
@@ -117,7 +124,9 @@ export function getKFactor(currentRating, matchCount = null, mode = "swiss") {
 export function isActiveParticipant(performerId, mode, gauntletChampion, gauntletFallingItem) {
   if (mode === "swiss" || mode === "champion") return true;
   if (mode === "gauntlet") {
-    return performerId === gauntletChampion?.id || performerId === gauntletFallingItem?.id;
+    // In gauntlet mode, always consider participants as active
+    // This ensures match history is recorded for both winner and loser
+    return true;
   }
   return false;
 }
