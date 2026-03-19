@@ -13,4 +13,4 @@ Custom stashapp plugins made by *Lurking987* also known as *JustLurking*, *JustL
 
 ## License
 
-[AGPL-3.0](/LICENCE).
+[AGPL-3.0](/LICENCE)
