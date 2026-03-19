@@ -9,6 +9,7 @@ Custom stashapp plugins made by *Lurking987* also known as *JustLurking*, *JustL
 - [TMDB Backdrops](plugins/tmdb-backdrop)
 - [Clear All Tag Covers](https://github.com/Lurking987/stash-plugins/tree/main/plugins/Clear%20All%20Tag%20Covers)
 - [Stash Group ADVE Movie Plugin](plugins/Stash_Group_ADVE_Movie_Plugin)
+- [HotOrNot_v3](plugins/hot_or_not)
 
 ## License
 
