@@ -6,9 +6,6 @@
  *                                                  ↓ scrapes ADVE with age-gate cookie
  *                                                  ↓ writes .results/group_<id>.json
  *   Browser JS  ←  polls GET /plugin/movie-scene-checker/.results/group_<id>.json
- *
- * This keeps ALL external HTTP requests server-side, bypassing CORS and the
- * ADVE age confirmation redirect entirely.
  */
 
 (function () {
@@ -17,8 +14,8 @@
   const PLUGIN_ID   = "Stash_Group_ADVE_Movie_Plugin";
   const MOUNT_ID    = "scene-checker-root";
   const GROUP_ROUTE = /^\/(groups|movies)\/(\d+)/;
-  const POLL_MS     = 1500;   // how often to check for the result file
-  const POLL_MAX    = 40;     // max attempts (~60 seconds)
+  const POLL_MS     = 1500;
+  const POLL_MAX    = 40;
 
   // ── Wait for PluginApi ─────────────────────────────────────────────────────
 
@@ -35,7 +32,7 @@
     }, 200);
   }
 
-  // ── Stash GraphQL (plain fetch — the correct community pattern) ────────────
+  // ── Stash GraphQL ──────────────────────────────────────────────────────────
 
   async function callGQL(query, variables) {
     const resp = await fetch("/graphql", {
@@ -49,14 +46,10 @@
     return json.data;
   }
 
-  // ── Fetch Group URLs + scenes from Stash ───────────────────────────────────
-
   const FIND_GROUP_QUERY = `
     query SceneCheckerFindGroup($id: ID!) {
       findGroup(id: $id) {
-        id
-        name
-        urls
+        id name urls
         scenes { id title }
       }
     }
@@ -66,11 +59,6 @@
     const data = await callGQL(FIND_GROUP_QUERY, { id: groupId });
     return data?.findGroup ?? null;
   }
-
-  // ── Trigger Python backend task via RunPluginTask mutation ─────────────────
-  //
-  // RunPluginTask is fire-and-forget: it queues the task and returns a job ID.
-  // The Python script writes its result to a JSON file we can poll for.
 
   const RUN_TASK_MUTATION = `
     mutation SceneCheckerRunTask($plugin_id: ID!, $task_name: String!, $args: [PluginArgInput!]) {
@@ -86,15 +74,6 @@
     });
   }
 
-  // ── Poll for result file written by checker.py ─────────────────────────────
-  //
-  // checker.py writes to:
-  //   <plugin_dir>/.results/group_<id>.json
-  // Stash serves plugin static files at:
-  //   /plugin/<plugin_id>/assets/<path>
-  // So we poll:
-  //   /plugin/Stash_Group_ADVE_Movie_Plugin/assets/results/group_<id>.json
-
   function resultUrl(groupId) {
     return `/plugin/${PLUGIN_ID}/assets/results/group_${groupId}.json`;
   }
@@ -107,17 +86,12 @@
         const resp = await fetch(resultUrl(groupId) + "?t=" + Date.now());
         if (resp.ok) {
           const data = await resp.json();
-          // Make sure it's fresh (for this group, not a stale result)
           if (data.group_id === groupId || data.error) return data;
         }
-      } catch (_) {
-        // Not ready yet — keep polling
-      }
+      } catch (_) {}
     }
     throw new Error("Timed out waiting for scene data. Check Stash task logs.");
   }
-
-  // ── ADVE URL detection (just for the "no URL" warning) ────────────────────
 
   const ADVE_RE = /https?:\/\/(?:www\.)?adultdvdempire\.com\/[^\s"'>]+/i;
 
@@ -180,17 +154,15 @@
     }
 
     function Panel({ groupId }) {
-      const [open, setOpen]         = useState(false);
-      const [status, setStatus]     = useState("idle");
-      const [scenes, setScenes]     = useState([]);
+      const [open, setOpen]             = useState(false);
+      const [status, setStatus]         = useState("idle");
+      const [scenes, setScenes]         = useState([]);
       const [movieTitle, setMovieTitle] = useState("");
-      const [filter, setFilter]     = useState("all");
-      const [err, setErr]           = useState("");
-      const [pollStep, setPollStep] = useState(0);
+      const [adveUrl, setAdveUrl]       = useState("");
+      const [filter, setFilter]         = useState("all");
+      const [err, setErr]               = useState("");
+      const [pollStep, setPollStep]     = useState(0);
 
-      // On mount: check if a result file already exists for this group.
-      // If it does, restore the done state immediately without re-running
-      // the task — this handles page refreshes and back-navigation.
       useEffect(() => {
         let cancelled = false;
         fetch(resultUrl(groupId) + "?t=" + Date.now())
@@ -199,6 +171,7 @@
             if (cancelled || !data || data.error) return;
             if (data.group_id === groupId && data.scenes) {
               setMovieTitle(data.movie_title || "");
+              setAdveUrl(data.adve_url || "");
               setScenes(data.scenes || []);
               setStatus("done");
             }
@@ -211,16 +184,13 @@
         setStatus("loading");
         setScenes([]);
         setMovieTitle("");
+        setAdveUrl("");
         setErr("");
         setPollStep(0);
-
         try {
           const group = await fetchGroup(groupId);
           if (!group) throw new Error("Group not found in Stash.");
-          if (!findAdveUrl(group.urls)) {
-            setStatus("no_url");
-            return;
-          }
+          if (!findAdveUrl(group.urls)) { setStatus("no_url"); return; }
           await triggerPythonTask(groupId);
           setStatus("polling");
           const result = await pollForResult(groupId, (step) => setPollStep(step));
@@ -230,6 +200,7 @@
             throw new Error(result.error);
           } else {
             setMovieTitle(result.movie_title || "");
+            setAdveUrl(result.adve_url || "");
             setScenes(result.scenes || []);
             setStatus("done");
           }
@@ -246,7 +217,6 @@
       const pollPct = Math.round((pollStep / POLL_MAX) * 100);
       const busy    = status === "loading" || status === "polling";
 
-      // Collapsed: just a small toggle button
       if (!open) {
         return h("div", { style: S.collapsed },
           h("button", { style: S.toggleBtn, onClick: () => setOpen(true) },
@@ -258,14 +228,15 @@
         );
       }
 
-      // Expanded panel
       return h("div", { style: S.panel },
-
-        // Header row: title + collapse button + action button
         h("div", { style: S.header },
           h("div", null,
             h("h4", { style: S.title }, "🎬 Scene Checker"),
-            movieTitle && h("p", { style: S.subtitle }, movieTitle)
+            movieTitle && h("p", { style: S.subtitle },
+              adveUrl
+                ? h("a", { href: adveUrl, target: "_blank", rel: "noreferrer", style: S.subtitleLink }, movieTitle)
+                : movieTitle
+            )
           ),
           h("div", { style: { display:"flex", gap:"0.5rem", alignItems:"center", flexShrink:0 } },
             h("button", {
@@ -280,13 +251,9 @@
                            title: "Hide Scene Checker" }, "✕")
           )
         ),
-
-        // Idle
         status === "idle" &&
           h("p", { style: S.hint },
             "Click Check Scenes to compare this Group against AdultDVDEmpire."),
-
-        // No URL
         status === "no_url" &&
           h("div", { style: S.warnBox },
             h("span", { style: { fontSize: "1.4rem" } }, "⚠️"),
@@ -296,12 +263,8 @@
                 "Add the ADVE movie page URL to this Group's URL list, then click Check Scenes.")
             )
           ),
-
-        // Error
         status === "error" &&
           h("div", { style: S.errBox }, "❌ ", err),
-
-        // Loading / polling
         busy &&
           h("div", { style: S.loadBox },
             h("div", { style: S.spinner }),
@@ -315,15 +278,12 @@
                 )
             )
           ),
-
-        // Results
         status === "done" &&
           h(React.Fragment, null,
             h(StatBar, { total: scenes.length, inLib: scenes.length - missing, missing }),
             h(FilterBar, { filter, setFilter, total: scenes.length, missing }),
             visible.length === 0
-              ? h("p", { style: { ...S.hint, textAlign: "center" } },
-                  "No scenes match this filter.")
+              ? h("p", { style: { ...S.hint, textAlign: "center" } }, "No scenes match this filter.")
               : h("div", { style: S.grid },
                   visible.map((s) => h(SceneCard, { key: s.adve.index, scene: s }))
                 ),
@@ -339,81 +299,82 @@
   // ── Styles ─────────────────────────────────────────────────────────────────
 
   const S = {
-    collapsed:  { margin:"1rem 0 0" },
-    toggleBtn:  { background:"#1a1d2e", border:"1px solid #2e3150", borderRadius:"8px",
-                  color:"#e2e8f0", padding:"0.45rem 1rem", cursor:"pointer",
-                  fontWeight:600, fontSize:"0.85rem", display:"inline-flex",
-                  alignItems:"center", gap:"0.5rem", fontFamily:"system-ui,sans-serif" },
-    toggleBadge:{ background:"#2e3150", borderRadius:"10px", padding:"0.1rem 0.55rem",
-                  fontSize:"0.75rem", color:"#a5b4fc", fontWeight:700 },
-    collapseBtn:{ background:"transparent", border:"1px solid #2e3150", borderRadius:"6px",
-                  color:"#94a3b8", width:"28px", height:"28px", cursor:"pointer",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:"0.75rem", padding:0 },
-    panel:      { background:"#1a1d2e", border:"1px solid #2e3150", borderRadius:"10px",
-                  padding:"1.25rem", margin:"1rem 0 0", color:"#e2e8f0",
-                  fontFamily:"system-ui,sans-serif", width:"100%", boxSizing:"border-box" },
-    header:     { display:"flex", alignItems:"flex-start", justifyContent:"space-between",
-                  marginBottom:"1rem" },
-    title:      { margin:0, fontSize:"1.05rem", fontWeight:700 },
-    subtitle:   { margin:"3px 0 0", fontSize:"0.8rem", opacity:0.5 },
-    btn:        { background:"linear-gradient(135deg,#6366f1,#8b5cf6)", color:"#fff", border:"none",
-                  borderRadius:"6px", padding:"0.4rem 1rem", cursor:"pointer",
-                  fontWeight:600, fontSize:"0.85rem", flexShrink:0 },
-    btnOff:     { background:"#374151", color:"#9ca3af", border:"none", borderRadius:"6px",
-                  padding:"0.4rem 1rem", cursor:"not-allowed",
-                  fontWeight:600, fontSize:"0.85rem", flexShrink:0 },
-    hint:       { opacity:0.45, fontSize:"0.875rem", margin:"0.5rem 0" },
-    warnBox:    { display:"flex", gap:"0.875rem", alignItems:"flex-start", background:"#451a03",
-                  border:"1px solid #92400e", borderRadius:"8px",
-                  padding:"1rem", marginBottom:"0.5rem" },
-    errBox:     { background:"#3b0a0a", border:"1px solid #7f1d1d", borderRadius:"8px",
-                  padding:"0.875rem", color:"#fca5a5", fontSize:"0.875rem" },
-    loadBox:    { display:"flex", alignItems:"flex-start", gap:"0.75rem",
-                  padding:"1.25rem 0", opacity:0.75, fontSize:"0.875rem" },
-    spinner:    { width:"18px", height:"18px", border:"2px solid #6366f1",
-                  borderTopColor:"transparent", borderRadius:"50%",
-                  animation:"sc-spin 0.75s linear infinite", flexShrink:0, marginTop:"2px" },
-    progressBar:{ height:"4px", background:"#1e2235", borderRadius:"2px",
-                  marginTop:"8px", width:"200px", overflow:"hidden" },
+    collapsed:   { margin:"1rem 0 0" },
+    toggleBtn:   { background:"#1a1d2e", border:"1px solid #2e3150", borderRadius:"8px",
+                   color:"#e2e8f0", padding:"0.45rem 1rem", cursor:"pointer",
+                   fontWeight:600, fontSize:"0.85rem", display:"inline-flex",
+                   alignItems:"center", gap:"0.5rem", fontFamily:"system-ui,sans-serif" },
+    toggleBadge: { background:"#2e3150", borderRadius:"10px", padding:"0.1rem 0.55rem",
+                   fontSize:"0.75rem", color:"#a5b4fc", fontWeight:700 },
+    collapseBtn: { background:"transparent", border:"1px solid #2e3150", borderRadius:"6px",
+                   color:"#94a3b8", width:"28px", height:"28px", cursor:"pointer",
+                   display:"flex", alignItems:"center", justifyContent:"center",
+                   fontSize:"0.75rem", padding:0 },
+    panel:       { background:"#1a1d2e", border:"1px solid #2e3150", borderRadius:"10px",
+                   padding:"1.25rem", margin:"1rem 0 0", color:"#e2e8f0",
+                   fontFamily:"system-ui,sans-serif", width:"100%", boxSizing:"border-box" },
+    header:      { display:"flex", alignItems:"flex-start", justifyContent:"space-between",
+                   marginBottom:"1rem" },
+    title:       { margin:0, fontSize:"1.05rem", fontWeight:700 },
+    subtitle:    { margin:"3px 0 0", fontSize:"0.8rem", opacity:0.5 },
+    subtitleLink:{ color:"inherit", textDecoration:"underline", textDecorationStyle:"dotted", opacity:0.7 },
+    btn:         { background:"linear-gradient(135deg,#6366f1,#8b5cf6)", color:"#fff", border:"none",
+                   borderRadius:"6px", padding:"0.4rem 1rem", cursor:"pointer",
+                   fontWeight:600, fontSize:"0.85rem", flexShrink:0 },
+    btnOff:      { background:"#374151", color:"#9ca3af", border:"none", borderRadius:"6px",
+                   padding:"0.4rem 1rem", cursor:"not-allowed",
+                   fontWeight:600, fontSize:"0.85rem", flexShrink:0 },
+    hint:        { opacity:0.45, fontSize:"0.875rem", margin:"0.5rem 0" },
+    warnBox:     { display:"flex", gap:"0.875rem", alignItems:"flex-start", background:"#451a03",
+                   border:"1px solid #92400e", borderRadius:"8px",
+                   padding:"1rem", marginBottom:"0.5rem" },
+    errBox:      { background:"#3b0a0a", border:"1px solid #7f1d1d", borderRadius:"8px",
+                   padding:"0.875rem", color:"#fca5a5", fontSize:"0.875rem" },
+    loadBox:     { display:"flex", alignItems:"flex-start", gap:"0.75rem",
+                   padding:"1.25rem 0", opacity:0.75, fontSize:"0.875rem" },
+    spinner:     { width:"18px", height:"18px", border:"2px solid #6366f1",
+                   borderTopColor:"transparent", borderRadius:"50%",
+                   animation:"sc-spin 0.75s linear infinite", flexShrink:0, marginTop:"2px" },
+    progressBar: { height:"4px", background:"#1e2235", borderRadius:"2px",
+                   marginTop:"8px", width:"200px", overflow:"hidden" },
     progressFill:{ height:"100%", background:"linear-gradient(90deg,#6366f1,#8b5cf6)",
                    borderRadius:"2px", transition:"width 0.4s ease" },
-    statBar:    { display:"flex", gap:"1.25rem", alignItems:"center", background:"#0f1020",
-                  borderRadius:"8px", padding:"0.65rem 1rem",
-                  marginBottom:"0.875rem", flexWrap:"wrap" },
-    statItem:   { fontSize:"0.85rem" },
-    pct:        { borderRadius:"20px", padding:"0.15rem 0.7rem",
-                  fontSize:"0.78rem", color:"#fff", fontWeight:700 },
-    filterBar:  { display:"flex", gap:"0.5rem", marginBottom:"0.875rem" },
-    fOff:       { background:"#1e2235", border:"1px solid #2e3150", color:"#94a3b8",
-                  borderRadius:"20px", padding:"0.25rem 0.85rem",
-                  cursor:"pointer", fontSize:"0.78rem" },
-    fOn:        { background:"#4f46e5", border:"1px solid #6366f1", color:"#fff",
-                  borderRadius:"20px", padding:"0.25rem 0.85rem",
-                  cursor:"pointer", fontSize:"0.78rem", fontWeight:600 },
-    grid:       { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",
-                  gap:"0.875rem" },
-    card:       { background:"#0f1020", border:"1px solid #1e2235",
-                  borderRadius:"8px", overflow:"hidden" },
-    thumbWrap:  { position:"relative", aspectRatio:"16/9",
-                  background:"#1a1d2e", overflow:"hidden" },
-    thumb:      { width:"100%", height:"100%", objectFit:"cover", display:"block" },
-    noThumb:    { width:"100%", height:"100%", display:"flex", alignItems:"center",
-                  justifyContent:"center", fontSize:"0.7rem", opacity:0.25 },
-    badgeHave:  { position:"absolute", top:"5px", right:"5px",
-                  background:"rgba(34,197,94,0.92)", color:"#fff",
-                  borderRadius:"4px", padding:"2px 6px", fontSize:"0.68rem", fontWeight:700 },
-    badgeMiss:  { position:"absolute", top:"5px", right:"5px",
-                  background:"rgba(239,68,68,0.92)", color:"#fff",
-                  borderRadius:"4px", padding:"2px 6px", fontSize:"0.68rem", fontWeight:700 },
-    cardBody:   { padding:"0.55rem 0.7rem" },
-    sceneTitle: { margin:"0 0 3px", fontSize:"0.78rem", fontWeight:600, lineHeight:1.3,
-                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
-    duration:   { fontSize:"0.7rem", color:"#94a3b8", background:"#1e2235",
-                  borderRadius:"3px", padding:"1px 5px" },
-    performers: { margin:"4px 0 0", fontSize:"0.7rem", color:"#64748b",
-                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
-    cacheNote:  { marginTop:"0.875rem", fontSize:"0.7rem", opacity:0.3, textAlign:"right" },
+    statBar:     { display:"flex", gap:"1.25rem", alignItems:"center", background:"#0f1020",
+                   borderRadius:"8px", padding:"0.65rem 1rem",
+                   marginBottom:"0.875rem", flexWrap:"wrap" },
+    statItem:    { fontSize:"0.85rem" },
+    pct:         { borderRadius:"20px", padding:"0.15rem 0.7rem",
+                   fontSize:"0.78rem", color:"#fff", fontWeight:700 },
+    filterBar:   { display:"flex", gap:"0.5rem", marginBottom:"0.875rem" },
+    fOff:        { background:"#1e2235", border:"1px solid #2e3150", color:"#94a3b8",
+                   borderRadius:"20px", padding:"0.25rem 0.85rem",
+                   cursor:"pointer", fontSize:"0.78rem" },
+    fOn:         { background:"#4f46e5", border:"1px solid #6366f1", color:"#fff",
+                   borderRadius:"20px", padding:"0.25rem 0.85rem",
+                   cursor:"pointer", fontSize:"0.78rem", fontWeight:600 },
+    grid:        { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",
+                   gap:"0.875rem" },
+    card:        { background:"#0f1020", border:"1px solid #1e2235",
+                   borderRadius:"8px", overflow:"hidden" },
+    thumbWrap:   { position:"relative", aspectRatio:"16/9",
+                   background:"#1a1d2e", overflow:"hidden" },
+    thumb:       { width:"100%", height:"100%", objectFit:"cover", display:"block" },
+    noThumb:     { width:"100%", height:"100%", display:"flex", alignItems:"center",
+                   justifyContent:"center", fontSize:"0.7rem", opacity:0.25 },
+    badgeHave:   { position:"absolute", top:"5px", right:"5px",
+                   background:"rgba(34,197,94,0.92)", color:"#fff",
+                   borderRadius:"4px", padding:"2px 6px", fontSize:"0.68rem", fontWeight:700 },
+    badgeMiss:   { position:"absolute", top:"5px", right:"5px",
+                   background:"rgba(239,68,68,0.92)", color:"#fff",
+                   borderRadius:"4px", padding:"2px 6px", fontSize:"0.68rem", fontWeight:700 },
+    cardBody:    { padding:"0.55rem 0.7rem" },
+    sceneTitle:  { margin:"0 0 3px", fontSize:"0.78rem", fontWeight:600, lineHeight:1.3,
+                   whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
+    duration:    { fontSize:"0.7rem", color:"#94a3b8", background:"#1e2235",
+                   borderRadius:"3px", padding:"1px 5px" },
+    performers:  { margin:"4px 0 0", fontSize:"0.7rem", color:"#64748b",
+                   whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
+    cacheNote:   { marginTop:"0.875rem", fontSize:"0.7rem", opacity:0.3, textAlign:"right" },
   };
 
   if (!document.getElementById("sc-keyframes")) {
@@ -430,77 +391,126 @@
     return m ? m[2] : null;
   }
 
-  function findAnchor() {
-    // Insert after the .details-edit div (Edit/Delete buttons) so the panel
-    // sits below them, aligned to the same left boundary.
-    // Fall back to broader containers for older Stash versions.
-    const detailsEdit = document.querySelector(".details-edit");
-    if (detailsEdit) return detailsEdit;
+  let _mountedId    = null;
+  let _root         = null;
+  let _initObserver = null; // one-shot: waits for DOM to be ready on navigation
+  let _editObserver = null; // persistent: watches for edit mode toggling
+  let _retryTimer   = null;
 
-    const candidates = [
-      ".group-head.col",
-      ".group-head",
-      ".group-details .details-body",
-      ".movie-details .details-body",
-      ".group-details",
-      ".movie-details",
-      ".detail-container",
-      "main .container",
-      "main",
-    ];
-    for (const sel of candidates) {
-      const el = document.querySelector(sel);
-      if (el) return el;
-    }
-    return null;
+  // Edit mode: .details-edit gains col-xl-9 when the form is open
+  function isEditMode() {
+    const anchor = document.querySelector(".details-edit");
+    return !!(anchor && anchor.classList.contains("col-xl-9"));
   }
 
-  let _mountedId = null;
-  let _root      = null;
+  function doMount(React, ReactDOM, groupId) {
+    if (!getGroupId()) return false;
+    if (isEditMode()) return false;
 
-  function mountPanel(React, ReactDOM) {
-    const groupId = getGroupId();
-    if (!groupId)               { unmountPanel(); return; }
-    if (groupId === _mountedId) return;
-    unmountPanel();
+    const anchor = document.querySelector(".details-edit");
+    if (!anchor) return false;
 
-    setTimeout(() => {
-      const anchor = findAnchor();
-      if (!anchor) {
-        console.warn("[SceneChecker] No DOM anchor found.");
-        return;
+    const existing = document.getElementById(MOUNT_ID);
+
+    // Already mounted in the right place — nothing to do
+    if (existing && _mountedId === groupId && anchor.nextElementSibling === existing) {
+      return true;
+    }
+
+    // Needs remounting (wrong position, wrong group, or missing)
+    if (existing) {
+      if (_root?.unmount) _root.unmount();
+      existing.remove();
+      _root = null;
+    }
+
+    const el = document.createElement("div");
+    el.id = MOUNT_ID;
+    anchor.insertAdjacentElement("afterend", el);
+
+    const Panel = buildPanel(React);
+    if (ReactDOM.createRoot) {
+      _root = ReactDOM.createRoot(el);
+      _root.render(React.createElement(Panel, { groupId }));
+    } else {
+      ReactDOM.render(React.createElement(Panel, { groupId }), el);
+    }
+    _mountedId = groupId;
+    console.log(`[SceneChecker] Mounted for group ${groupId}`);
+    return true;
+  }
+
+  // Persistent observer — runs for the lifetime of the page session.
+  // Watches for edit mode opening/closing (class change on .details-edit)
+  // and remounts the panel whenever view mode is restored.
+  function ensureEditObserver(React, ReactDOM) {
+    if (_editObserver) return;
+    _editObserver = new MutationObserver(() => {
+      const groupId = getGroupId();
+      if (!groupId) return;
+      if (isEditMode()) return; // form still open — keep waiting
+
+      const anchor  = document.querySelector(".details-edit");
+      const existing = document.getElementById(MOUNT_ID);
+
+      // Remount if panel is missing or no longer sits right after the anchor
+      if (!existing || (anchor && anchor.nextElementSibling !== existing)) {
+        doMount(React, ReactDOM, groupId);
       }
-      let el = document.getElementById(MOUNT_ID);
-      if (!el) {
-        el = document.createElement("div");
-        el.id = MOUNT_ID;
-        // If anchor is .details-edit, insert after it (not inside it)
-        if (anchor.classList.contains("details-edit")) {
-          anchor.insertAdjacentElement("afterend", el);
-        } else {
-          anchor.appendChild(el);
-        }
-      }
-      const Panel = buildPanel(React);
-      const node  = React.createElement(Panel, { groupId });
-      if (ReactDOM.createRoot) {
-        _root = ReactDOM.createRoot(el);
-        _root.render(node);
-      } else {
-        ReactDOM.render(node, el);
-      }
-      _mountedId = groupId;
-      console.log(`[SceneChecker] Mounted for group ${groupId}`);
-    }, 600);
+    });
+    _editObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
   }
 
   function unmountPanel() {
+    if (_initObserver) { _initObserver.disconnect(); _initObserver = null; }
+    if (_retryTimer)   { clearTimeout(_retryTimer);  _retryTimer = null; }
+    // Note: _editObserver stays alive — it handles edit mode for the session
     const el = document.getElementById(MOUNT_ID);
-    if (!el) return;
-    if (_root?.unmount) _root.unmount();
-    el.remove();
-    _mountedId = null;
+    if (el) {
+      if (_root?.unmount) _root.unmount();
+      el.remove();
+    }
     _root      = null;
+    _mountedId = null;
+  }
+
+  function mountPanel(React, ReactDOM) {
+    // Cancel any in-flight one-shot observer from a previous navigation
+    if (_initObserver) { _initObserver.disconnect(); _initObserver = null; }
+    if (_retryTimer)   { clearTimeout(_retryTimer);  _retryTimer = null; }
+
+    // Make sure the persistent edit-mode watcher is running
+    ensureEditObserver(React, ReactDOM);
+
+    const groupId = getGroupId();
+    if (!groupId) {
+      unmountPanel();
+      return;
+    }
+
+    // Try mounting immediately (works if DOM is already ready)
+    if (doMount(React, ReactDOM, groupId)) return;
+
+    // Otherwise wait for .details-edit to appear in view mode
+    _initObserver = new MutationObserver(() => {
+      if (!document.querySelector(".details-edit") || isEditMode()) return;
+      _initObserver.disconnect();
+      _initObserver = null;
+      if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+      doMount(React, ReactDOM, groupId);
+    });
+    _initObserver.observe(document.body, { childList: true, subtree: true });
+
+    _retryTimer = setTimeout(() => {
+      if (_initObserver) { _initObserver.disconnect(); _initObserver = null; }
+      _retryTimer = null;
+      console.warn("[SceneChecker] Timed out waiting for .details-edit.");
+    }, 10000);
   }
 
   // ── Boot ───────────────────────────────────────────────────────────────────

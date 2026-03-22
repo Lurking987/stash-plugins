@@ -31,24 +31,33 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 class log:
+    # Stash plugin log protocol (from stash/pkg/plugin/common/log):
+    # Each line on stderr: SOH () + level letter + STX () + message
+    # Level letters: t=trace, d=debug, i=info, w=warning, e=error, p=progress
+    TRACE    = "t"
+    DEBUG    = "d"
+    INFO     = "i"
+    WARNING  = "w"
+    ERROR    = "e"
+    PROGRESS = "p"
+
     @staticmethod
     def _emit(level: str, msg: str):
         print(f"{level}{msg}", file=sys.stderr, flush=True)
 
     @staticmethod
-    def trace(msg):   log._emit("2TRACE:",   msg)
+    def trace(msg):   log._emit(log.TRACE,   msg)
     @staticmethod
-    def debug(msg):   log._emit("2DEBUG:",   msg)
+    def debug(msg):   log._emit(log.DEBUG,   msg)
     @staticmethod
-    def info(msg):    log._emit("2INFO:",    msg)
+    def info(msg):    log._emit(log.INFO,    msg)
     @staticmethod
-    def warning(msg): log._emit("2WARNING:", msg)
+    def warning(msg): log._emit(log.WARNING, msg)
     @staticmethod
-    def error(msg):   log._emit("2ERROR:",   msg)
+    def error(msg):   log._emit(log.ERROR,   msg)
     @staticmethod
     def progress(pct: float):
-        # pct is 0.0 – 1.0; Stash renders this as the task progress bar
-        log._emit("2PROGRESS:", f"{pct:.3f}")
+        log._emit(log.PROGRESS, f"{pct:.3f}")
 
 
 # ─────────────────────────────────────────────
