@@ -1,6 +1,6 @@
 name: "Stash Group ADVE Movie Checker"
 description: "Compares scenes in a Stash Group against AdultDVDEmpire. Requires an ADVE URL in the Group's URL list."
-version: "0.3.0"
+version: "0.8.0"
 
 ui:
   javascript:
