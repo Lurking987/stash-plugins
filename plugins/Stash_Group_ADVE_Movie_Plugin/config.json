@@ -1,5 +1,3 @@
 {
-  "stash_url": "http://localhost:9999",
-  "stash_api_key": "",
   "adve_session_cookie": "ageConfirmed=true; defaults={}; etoken=PASTE_YOUR_ETOKEN_HERE"
 }
