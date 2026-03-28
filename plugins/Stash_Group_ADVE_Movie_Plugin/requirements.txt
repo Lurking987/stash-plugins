@@ -1,0 +1,3 @@
+stashapp-tools
+requests
+beautifulsoup4

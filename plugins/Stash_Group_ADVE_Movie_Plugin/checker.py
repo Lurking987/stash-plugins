@@ -18,6 +18,8 @@ import time
 import hashlib
 import requests
 from typing import Optional
+
+from stashapi.stashapp import StashInterface
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -84,8 +86,6 @@ if os.path.exists(_config_path):
     except Exception as _e:
         log.warning(f"Could not read config.json: {_e}")
 
-STASH_URL           = os.getenv("STASH_URL")           or _config.get("stash_url",           "http://localhost:9999")
-STASH_API_KEY       = os.getenv("STASH_API_KEY")       or _config.get("stash_api_key",       "")
 ADVE_SESSION_COOKIE = os.getenv("ADVE_SESSION_COOKIE") or _config.get("adve_session_cookie", "")
 
 HEADERS = {
@@ -104,21 +104,7 @@ os.makedirs(RESULT_DIR, exist_ok=True)
 # STASH GRAPHQL
 # ─────────────────────────────────────────────
 
-def stash_gql(query: str, variables: dict = None) -> dict:
-    headers = {"Content-Type": "application/json"}
-    if STASH_API_KEY:
-        headers["ApiKey"] = STASH_API_KEY
-    resp = requests.post(
-        f"{STASH_URL}/graphql",
-        json={"query": query, "variables": variables or {}},
-        headers=headers,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json().get("data", {})
-
-
-def get_group(group_id: str) -> dict:
+def get_group(stash: StashInterface, group_id: str) -> dict:
     query = """
     query FindGroup($id: ID!) {
       findGroup(id: $id) {
@@ -134,10 +120,11 @@ def get_group(group_id: str) -> dict:
       }
     }
     """
-    return stash_gql(query, {"id": group_id}).get("findGroup")
+    result = stash.call_GQL(query, {"id": group_id})
+    return result.get("findGroup")
 
 
-def get_all_groups() -> list:
+def get_all_groups(stash: StashInterface) -> list:
     query = """
     query AllGroups($filter: FindFilterType, $group_filter: GroupFilterType) {
       findGroups(filter: $filter, group_filter: $group_filter) {
@@ -147,7 +134,7 @@ def get_all_groups() -> list:
     """
     # per_page: -1 returns all records; group_filter restricts to groups
     # whose URL list contains an adultdvdempire.com URL.
-    return stash_gql(query, {
+    result = stash.call_GQL(query, {
         "filter": {"per_page": -1},
         "group_filter": {
             "url": {
@@ -155,7 +142,8 @@ def get_all_groups() -> list:
                 "modifier": "INCLUDES",
             }
         },
-    }).get("findGroups", {}).get("groups", [])
+    })
+    return result.get("findGroups", {}).get("groups", [])
 
 
 # ─────────────────────────────────────────────
@@ -418,8 +406,8 @@ def match_scene(adve_scene: dict, stash_scenes: list) -> Optional[dict]:
     return None
 
 
-def build_comparison(group_id: str) -> dict:
-    group = get_group(group_id)
+def build_comparison(stash: StashInterface, group_id: str) -> dict:
+    group = get_group(stash, group_id)
     if not group:
         return {"error": f"Group {group_id} not found in Stash."}
 
@@ -473,18 +461,17 @@ def main():
         sys.exit(1)
 
 def _run():
-    raw = sys.stdin.read().strip()
-    try:
-        plugin_input = json.loads(raw) if raw else {}
-    except json.JSONDecodeError:
-        plugin_input = {}
+    json_input = json.loads(sys.stdin.read())
 
     if ADVE_SESSION_COOKIE:
         log.info("Session cookie loaded from config.json")
     else:
         log.warning("No session cookie found in config.json or environment")
 
-    args = plugin_input.get("args", {})
+    server_connection = json_input["server_connection"]
+    stash = StashInterface(server_connection)
+
+    args = json_input.get("args", {})
     mode = args.get("mode", "check_group")
 
     if mode == "check_group":
@@ -492,13 +479,13 @@ def _run():
         if not group_id:
             result = {"error": "group_id is required"}
         else:
-            result = build_comparison(group_id)
+            result = build_comparison(stash, group_id)
             # Write to result file so JS can poll for it
             write_result(group_id, result)
         print(json.dumps(result))
 
     elif mode == "scrape_all":
-        groups = get_all_groups()
+        groups = get_all_groups(stash)
         total = len(groups)
         summary = []
         log.info(f"Scraping {total} groups with ADVE URLs...")
@@ -508,7 +495,7 @@ def _run():
         for idx, g in enumerate(groups, start=1):
             if find_adve_url(g.get("urls", [])):
                 log.info(f"[{idx}/{total}] {g['name']}")
-                result = build_comparison(g["id"])
+                result = build_comparison(stash, g["id"])
                 write_result(g["id"], result)
                 summary.append({
                     "group_id": g["id"],

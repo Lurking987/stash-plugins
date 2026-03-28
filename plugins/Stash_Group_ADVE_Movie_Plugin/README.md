@@ -12,7 +12,7 @@ which you're still missing.
 |---|---|
 | Stash v0.25+ | Plugin API + patch system |
 | Python 3.10+ | Backend scraper |
-| `requests`, `beautifulsoup4` | `pip install -r requirements.txt` |
+| `requests`, `beautifulsoup4`, `stashapp-tools` | `pip install -r requirements.txt` |
 
 ---
 
@@ -39,16 +39,12 @@ text editor and fill in the three values:
 
 ```json
 {
-  "stash_url": "http://localhost:9999",
-  "stash_api_key": "",
   "adve_session_cookie": "ageConfirmed=true; defaults={}; etoken=PASTE_YOUR_ETOKEN_HERE"
 }
 ```
 
 | Key | Description |
 |---|---|
-| `stash_url` | URL of your Stash instance. Change if you use a custom port or remote host. |
-| `stash_api_key` | API key for your Stash instance. Leave blank if authentication is not enabled. |
 | `adve_session_cookie` | Your AdultDVDEmpire session cookie string. See instructions below. |
 
 ### How to get your AdultDVDEmpire session cookie
@@ -149,7 +145,7 @@ Each ADVE scene is matched to a Stash scene using these strategies in order:
 Stash_Group_ADVE_Movie_Plugin/
 ├── Stash_Group_ADVE_Movie_Plugin.yml   ← Plugin manifest
 ├── checker.py                          ← Backend: scraper + GraphQL + matching
-├── config.json                         ← Your settings (URL, API key, cookie)
+├── config.json                         ← Your settings (AdultDVDEmpire session cookie)
 ├── requirements.txt                    ← Python dependencies
 ├── panel.js                            ← Frontend UI injected into Group pages
 ├── results/                            ← Auto-created; persisted result JSON files
