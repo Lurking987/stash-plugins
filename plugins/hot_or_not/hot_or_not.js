@@ -2272,17 +2272,17 @@
   function getTierSpecificWindow(tier) {
     switch (tier) {
       case "S-Tier":
-        return 8;
+        return 3;
       case "A-Tier":
-        return 12;
+        return 5;
       case "B-Tier":
-        return 15;
+        return 7;
       case "C-Tier":
-        return 18;
+        return 9;
       case "D-Tier":
-        return 20;
+        return 12;
       default:
-        return 25;
+        return 15;
     }
   }
   async function fetchSwissPairImages() {
