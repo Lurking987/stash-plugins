@@ -2189,7 +2189,7 @@
     }
   }
   function shouldForceCrossTierMatch() {
-    return Math.random() < 0.05;
+    return Math.random() < 0.02;
   }
   function getCrossTierOpponent(allPerformers, targetPerformer) {
     const targetRating = targetPerformer.rating100 || 50;
@@ -2252,7 +2252,7 @@
   function getTierMatch(targetPerformer, allPerformers) {
     const targetRating = targetPerformer.rating100 || 50;
     const targetTier = getRatingTier2(targetRating);
-    if (Math.random() < 0.9) {
+    if (Math.random() < 0.95) {
       const sameTier = allPerformers.filter(
         (p) => p.id !== targetPerformer.id && getRatingTier2(p.rating100 || 50) === targetTier
       );
