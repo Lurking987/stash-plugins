@@ -2189,7 +2189,7 @@
     }
   }
   function shouldForceCrossTierMatch() {
-    return Math.random() < 0.08;
+    return Math.random() < 0.05;
   }
   function getCrossTierOpponent(allPerformers, targetPerformer) {
     const targetRating = targetPerformer.rating100 || 50;
