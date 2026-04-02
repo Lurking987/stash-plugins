@@ -1451,3 +1451,40 @@
   display: inline-block;
   margin: 0 5px;
 }
+.hon-meta-placeholder {
+  visibility: hidden;
+  min-height: 1.5em;
+}
+.hon-performer-meta {
+  min-height: 120px;
+}
+.hon-tags-more {
+  color: #007bff;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.hon-tags-more:hover {
+  color: #0056b3;
+}
+.hon-tags-container {
+  cursor: default;
+}
+.hon-performer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.hon-performer-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.hon-performer-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.hon-choose-btn {
+  margin-top: auto;
+}
