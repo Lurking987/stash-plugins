@@ -2189,7 +2189,7 @@
     }
   }
   function shouldForceCrossTierMatch() {
-    return Math.random() < 0.15;
+    return Math.random() < 0.08;
   }
   function getCrossTierOpponent(allPerformers, targetPerformer) {
     const targetRating = targetPerformer.rating100 || 50;
@@ -2234,6 +2234,55 @@
           loadNewPair();
         }
       };
+    }
+  }
+  function getRatingTier2(rating) {
+    if (rating >= 85)
+      return "S-Tier";
+    if (rating >= 70)
+      return "A-Tier";
+    if (rating >= 55)
+      return "B-Tier";
+    if (rating >= 40)
+      return "C-Tier";
+    if (rating >= 25)
+      return "D-Tier";
+    return "F-Tier";
+  }
+  function getTierMatch(targetPerformer, allPerformers) {
+    const targetRating = targetPerformer.rating100 || 50;
+    const targetTier = getRatingTier2(targetRating);
+    if (Math.random() < 0.9) {
+      const sameTier = allPerformers.filter(
+        (p) => p.id !== targetPerformer.id && getRatingTier2(p.rating100 || 50) === targetTier
+      );
+      if (sameTier.length > 0) {
+        const tierWindow = getTierSpecificWindow(targetTier);
+        const closeMatches = sameTier.filter(
+          (p) => Math.abs((p.rating100 || 50) - targetRating) <= tierWindow
+        );
+        if (closeMatches.length > 0) {
+          return closeMatches[Math.floor(Math.random() * closeMatches.length)];
+        }
+        return sameTier[Math.floor(Math.random() * sameTier.length)];
+      }
+    }
+    return null;
+  }
+  function getTierSpecificWindow(tier) {
+    switch (tier) {
+      case "S-Tier":
+        return 8;
+      case "A-Tier":
+        return 12;
+      case "B-Tier":
+        return 15;
+      case "C-Tier":
+        return 18;
+      case "D-Tier":
+        return 20;
+      default:
+        return 25;
     }
   }
   async function fetchSwissPairImages() {
@@ -2344,26 +2393,23 @@
       return true;
     });
     const rating1 = s1.p.rating100 || 50;
-    const dynamicWindow = calculateDynamicWindow(rating1, performers.length);
-    const similar = availablePerformers.filter(
-      (p) => Math.abs((p.rating100 || 50) - rating1) <= dynamicWindow
-    );
-    let s2;
-    if (similar.length > 0) {
-      const weightedSimilar = similar.map((p) => ({
-        p,
-        weight: getRecencyWeight(p) * getRatingProximityWeight(rating1, p.rating100 || 50)
-      }));
-      s2 = weightedRandomSelect(weightedSimilar, weightedSimilar.map((item) => item.weight));
+    let s2 = null;
+    const tierMatch = getTierMatch(s1.p, performers);
+    if (tierMatch && tierMatch.id !== s1.p.id) {
+      s2 = { p: tierMatch };
     } else {
-      if (availablePerformers.length > 0) {
-        const weightedOthers = availablePerformers.map((p) => ({
+      const dynamicWindow = getTierSpecificWindow(getRatingTier2(rating1));
+      const similar = availablePerformers.filter(
+        (p) => Math.abs((p.rating100 || 50) - rating1) <= dynamicWindow
+      );
+      if (similar.length > 0) {
+        const weightedSimilar = similar.map((p) => ({
           p,
-          weight: getRecencyWeight(p)
+          weight: getRecencyWeight(p) * getRatingProximityWeight(rating1, p.rating100 || 50)
         }));
-        s2 = weightedRandomSelect(weightedOthers, weightedOthers.map((item) => item.weight));
+        s2 = weightedRandomSelect(weightedSimilar, weightedSimilar.map((item) => item.weight));
       } else {
-        s2 = { p: performers.find((p) => p.id !== s1.p.id) };
+        s2 = { p: availablePerformers.find((p) => p.id !== s1.p.id) };
       }
     }
     let leftRank = null;
@@ -2382,22 +2428,9 @@
       ranks: [leftRank, rightRank]
     };
   }
-  function calculateDynamicWindow(rating, totalPerformers) {
-    const percentile = getRatingPercentile(rating, totalPerformers);
-    if (percentile >= 90)
-      return 15;
-    if (percentile >= 50)
-      return 30;
-    if (percentile >= 10)
-      return 50;
-    return 65;
-  }
   function getRatingProximityWeight(rating1, rating2) {
     const diff = Math.abs(rating1 - rating2);
     return Math.exp(-diff / 35);
-  }
-  function getRatingPercentile(rating, totalPerformers) {
-    return Math.max(1, Math.min(99, rating));
   }
   async function fetchGauntletPairPerformers() {
     const gender = state.gauntletChampion?.gender || state.selectedGenders[0];
