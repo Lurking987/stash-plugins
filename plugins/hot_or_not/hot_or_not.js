@@ -2252,20 +2252,25 @@
   function getTierMatch(targetPerformer, allPerformers) {
     const targetRating = targetPerformer.rating100 || 50;
     const targetTier = getRatingTier2(targetRating);
-    if (Math.random() < 0.95) {
-      const sameTier = allPerformers.filter(
-        (p) => p.id !== targetPerformer.id && getRatingTier2(p.rating100 || 50) === targetTier
-      );
-      if (sameTier.length > 0) {
-        const tierWindow = getTierSpecificWindow(targetTier);
-        const closeMatches = sameTier.filter(
-          (p) => Math.abs((p.rating100 || 50) - targetRating) <= tierWindow
-        );
-        if (closeMatches.length > 0) {
-          return closeMatches[Math.floor(Math.random() * closeMatches.length)];
-        }
-        return sameTier[Math.floor(Math.random() * sameTier.length)];
-      }
+    const tierWindow = getTierSpecificWindow(targetTier);
+    const sameTierClose = allPerformers.filter(
+      (p) => p.id !== targetPerformer.id && getRatingTier2(p.rating100 || 50) === targetTier && Math.abs((p.rating100 || 50) - targetRating) <= tierWindow
+    );
+    if (sameTierClose.length > 0) {
+      return sameTierClose[Math.floor(Math.random() * sameTierClose.length)];
+    }
+    const widerWindow = tierWindow * 2;
+    const sameTierWider = allPerformers.filter(
+      (p) => p.id !== targetPerformer.id && getRatingTier2(p.rating100 || 50) === targetTier && Math.abs((p.rating100 || 50) - targetRating) <= widerWindow
+    );
+    if (sameTierWider.length > 0) {
+      return sameTierWider[Math.floor(Math.random() * sameTierWider.length)];
+    }
+    const nearbyMatches = allPerformers.filter(
+      (p) => p.id !== targetPerformer.id && Math.abs((p.rating100 || 50) - targetRating) <= 15
+    );
+    if (nearbyMatches.length > 0) {
+      return nearbyMatches[Math.floor(Math.random() * nearbyMatches.length)];
     }
     return null;
   }
@@ -2430,7 +2435,7 @@
   }
   function getRatingProximityWeight(rating1, rating2) {
     const diff = Math.abs(rating1 - rating2);
-    return Math.exp(-diff / 35);
+    return Math.exp(-diff / 20);
   }
   async function fetchGauntletPairPerformers() {
     const gender = state.gauntletChampion?.gender || state.selectedGenders[0];
