@@ -2189,7 +2189,7 @@
     }
   }
   function shouldForceCrossTierMatch() {
-    return Math.random() < 0.02;
+    return Math.random() < 0.05;
   }
   function getCrossTierOpponent(allPerformers, targetPerformer) {
     const targetRating = targetPerformer.rating100 || 50;
@@ -2381,22 +2381,6 @@
       return { p, weight: recencyWeight, idx };
     });
     const s1 = weightedRandomSelect(weightedList, weightedList.map((item) => item.weight));
-    const recentlySelectedThreshold = 2;
-    const s1LastMatchDate = new Date(parsePerformerEloData(s1.p).last_match);
-    const s1HoursAgo = (Date.now() - s1LastMatchDate.getTime()) / (1e3 * 60 * 60);
-    let availablePerformers = performers.filter((p) => {
-      if (p.id === s1.p.id)
-        return false;
-      const pStats = parsePerformerEloData(p);
-      if (!pStats.last_match)
-        return true;
-      const pLastMatchDate = new Date(pStats.last_match);
-      const pHoursAgo = (Date.now() - pLastMatchDate.getTime()) / (1e3 * 60 * 60);
-      if (s1HoursAgo < 1 && pHoursAgo < 1) {
-        return Math.random() > 0.8;
-      }
-      return true;
-    });
     const rating1 = s1.p.rating100 || 50;
     let s2 = null;
     const tierMatch = getTierMatch(s1.p, performers);
@@ -2404,8 +2388,9 @@
       s2 = { p: tierMatch };
     } else {
       const dynamicWindow = getTierSpecificWindow(getRatingTier2(rating1));
-      const similar = availablePerformers.filter(
-        (p) => Math.abs((p.rating100 || 50) - rating1) <= dynamicWindow
+      const similar = performers.filter(
+        (p) => p.id !== s1.p.id && // Just ensure not matching against self
+        Math.abs((p.rating100 || 50) - rating1) <= dynamicWindow
       );
       if (similar.length > 0) {
         const weightedSimilar = similar.map((p) => ({
@@ -2414,7 +2399,7 @@
         }));
         s2 = weightedRandomSelect(weightedSimilar, weightedSimilar.map((item) => item.weight));
       } else {
-        s2 = { p: availablePerformers.find((p) => p.id !== s1.p.id) };
+        s2 = { p: performers.find((p) => p.id !== s1.p.id) };
       }
     }
     let leftRank = null;
