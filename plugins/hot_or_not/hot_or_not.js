@@ -938,22 +938,30 @@
     loserMatchCount,
     winnerStats = {},
     loserStats = {},
-    isSpecialChallenge = false,
-    specialChallengeRules = null
+    isSpecialChallenge = false
   }) {
     const ratingDiff = loserRating - winnerRating;
     const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
     const winnerK = getProgressiveKFactor(winnerRating, null, winnerMatchCount, mode);
     const loserK = getProgressiveKFactor(loserRating, null, loserMatchCount, mode);
     const winnerUnderdogMult = getUnderdogMultiplier(winnerRating, loserRating);
-    let lossProtection = 1;
-    if (isSpecialChallenge) {
-      lossProtection = 0.1;
-    } else {
-      lossProtection = getChallengeProtectionMultiplier(loserRating, winnerRating);
-    }
+    let lossProtection = isSpecialChallenge ? 0.1 : getChallengeProtectionMultiplier(loserRating, winnerRating);
     let winnerGain = Math.round(winnerK * (1 - expectedWinner) * winnerUnderdogMult);
     let loserLoss = Math.round(loserK * expectedWinner * lossProtection);
+    if (mode === "gauntlet") {
+      const currentStreak = winnerStats.current_streak || 0;
+      if (currentStreak >= 3) {
+        const gauntletDampener = Math.max(0.3, 1 - (currentStreak - 3) * 0.15);
+        winnerGain = Math.ceil(winnerGain * gauntletDampener);
+      }
+    }
+    if (mode === "champion") {
+      const winStreak = winnerStats.current_streak || 0;
+      if (winStreak >= 5) {
+        const streakPenalty = winStreak >= 10 ? 0.4 : 0.7;
+        winnerGain = Math.ceil(winnerGain * streakPenalty);
+      }
+    }
     if (winnerRating >= 85) {
       winnerGain = Math.ceil(winnerGain * 0.6);
     } else if (winnerRating >= 70) {
@@ -964,9 +972,10 @@
     } else if (winnerRating - loserRating > 20) {
       loserLoss = Math.min(loserLoss, 1);
     }
-    winnerGain = Math.max(1, winnerGain);
-    loserLoss = Math.max(0, loserLoss);
-    return { winnerGain, loserLoss };
+    return {
+      winnerGain: Math.max(1, winnerGain),
+      loserLoss: Math.max(0, loserLoss)
+    };
   }
   function getProgressiveKFactor(rating, opponentRating, matchCount, mode = "swiss") {
     const count = matchCount || 0;
@@ -976,8 +985,14 @@
       const reductionFactor = Math.max(0.5, 1 - (rating - 60) / 70);
       baseK *= reductionFactor;
     }
-    let kFactor = mode === "champion" ? Math.round(baseK * 0.7) : baseK;
-    return Math.min(40, Math.max(6, Math.round(kFactor)));
+    if (mode === "champion") {
+      let kFactor = Math.round(baseK * 0.85);
+      return Math.min(35, Math.max(6, kFactor));
+    } else if (mode === "gauntlet") {
+      let kFactor = Math.round(baseK * 1.1);
+      return Math.min(45, Math.max(8, kFactor));
+    }
+    return Math.min(40, Math.max(6, Math.round(baseK)));
   }
   function getChallengeProtectionMultiplier(rating, opponentRating) {
     const ratingDiff = opponentRating - rating;
@@ -1752,7 +1767,8 @@
     if (state.currentMode === "gauntlet") {
       if (state.gauntletFalling && state.gauntletFallingItem) {
         if (winnerId === state.gauntletFallingItem.id) {
-          const finalRating = Math.min(100, loserRating + 1);
+          const championRating = state.gauntletChampion?.rating100 || winnerRating;
+          const finalRating = championRating;
           await handleComparison(
             winnerId,
             // falling item (now winner)
@@ -1770,6 +1786,7 @@
           const finalRank = Math.max(1, (loserRank || 1) - 1);
           applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, { newWinnerRating: finalRating, newLoserRating: loserRating, winnerChange: 0, loserChange: 0 });
           setTimeout(() => showPlacementScreen2(winnerItem, finalRank, finalRating, state.battleType, state.totalItemsCount), 800);
+          return;
         } else {
           state.gauntletDefeated.push(winnerId);
           const outcome3 = await handleComparison(
@@ -1788,8 +1805,8 @@
             // not a draw
           );
           applyVisualFeedback(winnerCard, loserCard, winnerRating, loserRating, outcome3);
+          return;
         }
-        return;
       }
       const outcome2 = await handleComparison(winnerId, loserId, winnerRating, loserRating, loserRank, winnerItem, loserItem);
       updateGauntletState(winnerId, winnerItem, loserId, loserItem, outcome2.newWinnerRating);
@@ -1829,6 +1846,7 @@
     } else {
       state.gauntletChampion = winnerItem;
       state.gauntletWins = 1;
+      state.gauntletChampion.rating100 = newWinnerRating;
     }
   }
   async function handleSkip() {
