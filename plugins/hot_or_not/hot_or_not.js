@@ -39,7 +39,6 @@
         gauntletWins: 0,
         gauntletChampionRank: 0,
         gauntletDefeated: [],
-        // tracks defeated opponents in the current climb (shared by gauntlet + champion)
         gauntletFalling: false,
         gauntletFallingItem: null,
         // Filters & Settings
@@ -47,10 +46,15 @@
         badgeInjectionInProgress: false,
         pluginConfigCache: null,
         selectedGenders: ["FEMALE"],
-        // Undo history — each entry stores enough to reverse a match
+        // Enhanced tracking
         matchHistory: [],
+        skippedIds: [],
+        // Track multiple skipped IDs
+        seenPairs: /* @__PURE__ */ new Set(),
+        // Track seen performer pairs to prevent repetition
         // Skip tracking
         skippedId: null
+        // Keep for backward compatibility but deprecate
       };
     }
   });
@@ -324,11 +328,6 @@
   });
 
   // formatters.js
-  function getGenderDisplay(gender) {
-    if (!gender)
-      return "";
-    return (ALL_GENDERS.find((g) => g.value === gender) || { label: gender }).label;
-  }
   function formatDuration(seconds) {
     if (!seconds)
       return "N/A";
@@ -357,6 +356,45 @@
   });
 
   // ui-cards.js
+  function getRatingTier(rating) {
+    if (rating >= 85)
+      return "S-Tier";
+    if (rating >= 70)
+      return "A-Tier";
+    if (rating >= 55)
+      return "B-Tier";
+    if (rating >= 40)
+      return "C-Tier";
+    if (rating >= 25)
+      return "D-Tier";
+    return "F-Tier";
+  }
+  function getTierColor(tier) {
+    switch (tier) {
+      case "S-Tier":
+        return "#eb9834";
+      case "A-Tier":
+        return "#e014aa";
+      case "B-Tier":
+        return "#7f1e82";
+      case "C-Tier":
+        return "#14bbe0";
+      case "D-Tier":
+        return "#92e014";
+      case "F-Tier":
+        return "#808080";
+      default:
+        return "#000000";
+    }
+  }
+  function formatHeight(heightCm) {
+    if (!heightCm)
+      return null;
+    const totalInches = Math.round(heightCm * 0.393701);
+    const feet = Math.floor(totalInches / 12);
+    const inches = totalInches % 12;
+    return `${feet}\u2032${inches}\u2033 (${heightCm} cm)`;
+  }
   function renderCard(item, side, rank) {
     const streak = state.gauntletChampion?.id === item.id ? state.gauntletWins : null;
     if (state.battleType === "performers")
@@ -372,11 +410,11 @@
     const title = scene.title || file.path?.split(/[/\\]/).pop().replace(/\.[^/.]+$/, "") || `Scene #${scene.id}`;
     const screenshotPath = scene.paths?.screenshot;
     const previewPath = scene.paths?.preview;
-    const stashRating = scene.rating100 ? `${scene.rating100}/100` : "Unrated";
+    const stashRating = scene.rating100 ? (scene.rating100 / 10).toFixed(1) : "Unrated";
     const rankDisplay = rank != null ? `<span class="hon-scene-rank">${typeof rank === "number" ? "#" + rank : rank}</span>` : "";
     const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} win${streak > 1 ? "s" : ""}</div>` : "";
     return `
-    <div class="hon-scene-card" data-scene-id="${scene.id}" data-side="${side}" data-rating="${scene.rating100 || 50}">
+    <div class="hon-scene-card" data-scene-id="${scene.id}" data-side="${side}" data-rating="${scene.rating100 || 1}">
       <div class="hon-scene-image-container" data-scene-url="/scenes/${scene.id}">
         ${screenshotPath ? `<img class="hon-scene-image" src="${screenshotPath}" alt="${title}" loading="lazy" />` : `<div class="hon-scene-image hon-no-image">No Screenshot</div>`}
         ${previewPath ? `<video class="hon-hover-preview" src="${previewPath}" loop playsinline></video>` : ""}
@@ -400,27 +438,124 @@
   function createPerformerCard(performer, side, rank = null, streak = null) {
     const name = performer.name || `Performer #${performer.id}`;
     const imagePath = performer.image_path || null;
-    const stashRating = performer.rating100 ? `${performer.rating100}/100` : "Unrated";
-    const rankDisplay = rank != null ? `<span class="hon-performer-rank hon-scene-rank">#${rank}</span>` : "";
+    const rawRating = performer.rating100 ?? 1;
+    const stashRating = performer.rating100 !== null ? (rawRating / 10).toFixed(1) : "Unrated";
+    let tierDisplay = "";
+    if (performer.rating100 !== null) {
+      const tier = getRatingTier(rawRating);
+      const tierColor = getTierColor(tier);
+      tierDisplay = `<span style="font-weight: bold; color: ${tierColor}">${tier}</span> | `;
+    }
+    let genderIcon = "";
+    if (performer.gender) {
+      const genderKey = performer.gender.toUpperCase();
+      genderIcon = GENDER_ICONS[genderKey] || "\u{1F464}";
+    }
+    let currentStreakDisplay = "";
+    if (performer.custom_fields?.hotornot_stats) {
+      try {
+        const stats = JSON.parse(performer.custom_fields.hotornot_stats);
+        if (stats.current_streak && stats.current_streak > 1) {
+          currentStreakDisplay = `
+			<div class="hon-current-streak" style="position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; z-index: 10;">
+			  Win Streak:\u{1F525}${stats.current_streak} 
+			</div>`;
+        }
+      } catch (e) {
+        console.warn(`[HotOrNot] Failed to parse hotornot_stats for performer ${performer.id}:`, e);
+      }
+    }
+    let countsHtml = "";
+    const sceneCount = performer.scene_count || 0;
+    const galleryCount = performer.gallery_count || 0;
+    const imageCount = performer.image_count || 0;
+    if (sceneCount > 0 || galleryCount > 0 || imageCount > 0) {
+      const sceneDisplay = sceneCount > 0 ? `\u{1F3A5}(${sceneCount})` : "";
+      const galleryDisplay = galleryCount > 0 ? `\u{1F5BC}\uFE0F(${galleryCount})` : "";
+      const imageDisplay = imageCount > 0 ? `\u{1F4F7}(${imageCount})` : "";
+      const countsArray = [sceneDisplay, galleryDisplay, imageDisplay].filter(Boolean);
+      if (countsArray.length > 0) {
+        countsHtml = ` | ${countsArray.join(" ")}`;
+      }
+    }
+    const metaItems = [];
+    metaItems.push(`<div class="hon-meta-item"><strong>Rating:</strong> ${tierDisplay}${stashRating}</div>`);
+    if (performer.country) {
+      metaItems.push(`<div class="hon-meta-item"><strong>Country:</strong> ${getCountryDisplay(performer.country)}</div>`);
+    }
+    if (performer.height_cm) {
+      const heightFormatted = formatHeight(performer.height_cm);
+      if (heightFormatted) {
+        metaItems.push(`<div class="hon-meta-item"><strong>Height:</strong> ${heightFormatted}</div>`);
+      }
+    }
+    if (performer.measurements) {
+      metaItems.push(`<div class="hon-meta-item"><strong>Measurements:</strong> ${performer.measurements}</div>`);
+    }
+    if (performer.fake_tits) {
+      metaItems.push(`<div class="hon-meta-item"><strong>Fake Tits:</strong> ${performer.fake_tits}</div>`);
+    }
+    if (performer.tags && performer.tags.length > 0) {
+      const tagNames = performer.tags.map((tag) => tag.name || tag);
+      const displayedTags = tagNames.slice(0, 3).join(", ");
+      const remainingCount = Math.max(0, tagNames.length - 3);
+      if (tagNames.length <= 3) {
+        metaItems.push(`<div class="hon-meta-item"><strong>Tags:</strong> ${displayedTags}</div>`);
+      } else {
+        const allTagsHtml = tagNames.join(", ");
+        metaItems.push(`
+        <div class="hon-meta-item hon-tags-container">
+          <strong>Tags:</strong> 
+          <span class="hon-tags-displayed">${displayedTags}</span>
+          <span class="hon-tags-ellipsis">...</span>
+          <span class="hon-tags-more" style="color: #007bff; cursor: pointer; text-decoration: underline;">(+${remainingCount} more)</span>
+          <span class="hon-tags-expanded" style="display:none;">${allTagsHtml}</span>
+        </div>`);
+      }
+    }
+    const minMetaItems = 6;
+    while (metaItems.length < minMetaItems) {
+      metaItems.push('<div class="hon-meta-item hon-meta-placeholder">&nbsp;</div>');
+    }
     const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak} wins</div>` : "";
+    let badgeHtml = "";
+    if (rank != null && state.totalItemsCount > 0) {
+      const percentile = (state.totalItemsCount - rank + 1) / state.totalItemsCount * 100;
+      let tierEmoji = "\u{1F525}";
+      if (percentile >= 95)
+        tierEmoji = "\u{1F451}";
+      else if (percentile >= 80)
+        tierEmoji = "\u{1F947}";
+      else if (percentile >= 60)
+        tierEmoji = "\u{1F948}";
+      else if (percentile >= 40)
+        tierEmoji = "\u{1F949}";
+      badgeHtml = `
+      <div class="hon-battle-rank-badge" style="margin-bottom: 8px;">
+        <span class="hon-rank-emoji">${tierEmoji}</span>
+        <span class="hon-rank-text">Battle Rank #${rank}</span>
+        <span class="hon-rank-total">of ${state.totalItemsCount}</span>
+      </div>`;
+    }
     return `
-    <div class="hon-performer-card hon-scene-card" data-performer-id="${performer.id}" data-side="${side}" data-rating="${performer.rating100 || 50}">
+    <div class="hon-performer-card hon-scene-card" data-performer-id="${performer.id}" data-side="${side}" data-rating="${performer.rating100 || 1}">
       <div class="hon-performer-image-container hon-scene-image-container">
         <a href="/performers/${performer.id}" target="_blank" class="hon-performer-link">
           ${imagePath ? `<img class="hon-performer-image hon-scene-image" src="${imagePath}" alt="${name}" />` : `<div class="hon-no-image">No Image</div>`}
         </a>
+        ${currentStreakDisplay}
         ${streakDisplay}
       </div>
       <div class="hon-performer-body hon-scene-body" data-winner="${performer.id}">
         <div class="hon-performer-info hon-scene-info">
+          ${badgeHtml}
           <div class="hon-performer-title-row hon-scene-title-row">
-            <h3 class="hon-performer-title hon-scene-title">${name}</h3>
-            ${rankDisplay}
+            <h3 class="hon-performer-title hon-scene-title">
+              ${name} ${genderIcon}${countsHtml}
+            </h3>
           </div>
           <div class="hon-performer-meta hon-scene-meta">
-            <div class="hon-meta-item"><strong>Country:</strong> ${getCountryDisplay(performer.country)}</div>
-            <div class="hon-meta-item"><strong>Gender:</strong> ${getGenderDisplay(performer.gender)}</div>
-            <div class="hon-meta-item"><strong>Rating:</strong> ${stashRating}</div>
+            ${metaItems.join("")}
           </div>
         </div>
         <div class="hon-choose-btn">\u2713 Choose This Performer</div>
@@ -432,7 +567,7 @@
     const rankDisplay = rank != null ? `<span class="hon-image-rank hon-scene-rank">#${rank}</span>` : "";
     const streakDisplay = streak != null && streak > 0 ? `<div class="hon-streak-badge">\u{1F525} ${streak}</div>` : "";
     return `
-    <div class="hon-image-card hon-scene-card" data-image-id="${image.id}" data-side="${side}" data-rating="${image.rating100 || 50}">
+    <div class="hon-image-card hon-scene-card" data-image-id="${image.id}" data-side="${side}" data-rating="${image.rating100 || 1}">
       <div class="hon-image-image-container hon-scene-image-container" data-image-url="/images/${image.id}">
         ${thumbnailPath ? `<img class="hon-scene-image" src="${thumbnailPath}" />` : `<div class="hon-no-image">No Image</div>`}
         ${streakDisplay}
@@ -469,10 +604,30 @@
     </div>
   `;
   }
+  var GENDER_ICONS;
   var init_ui_cards = __esm({
     "ui-cards.js"() {
       init_state();
       init_formatters();
+      GENDER_ICONS = {
+        "FEMALE": "\u2640\uFE0F",
+        "MALE": "\u2642\uFE0F",
+        "TRANSGENDER_MALE": "\u26A7\uFE0F\u2642\uFE0F",
+        "TRANSGENDER_FEMALE": "\u26A7\uFE0F\u2640\uFE0F",
+        "INTERSEX": "\u26A5",
+        "NON_BINARY": "\u26A7\uFE0F"
+      };
+    }
+  });
+
+  // dom-utils.js
+  function clearDOMCache() {
+    elementCache.clear();
+  }
+  var elementCache;
+  var init_dom_utils = __esm({
+    "dom-utils.js"() {
+      elementCache = /* @__PURE__ */ new Map();
     }
   });
 
@@ -696,24 +851,22 @@
   // math-utils.js
   function getRecencyWeight(performer) {
     const stats = parsePerformerEloData(performer);
+    if (!stats.last_match || stats.total_matches === 0)
+      return 1;
     if (!stats.last_match)
-      return 0.7;
-    const hoursSince = (Date.now() - new Date(stats.last_match).getTime()) / (1e3 * 60 * 60);
-    return Math.min(1, 1 - Math.exp(-0.2 * hoursSince));
-  }
-  function weightedRandomSelect(items, weights) {
-    if (!items?.length || items.length !== weights?.length)
-      return null;
-    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-    if (totalWeight <= 0)
-      return items[Math.floor(Math.random() * items.length)];
-    let random = Math.random() * totalWeight;
-    for (let i = 0; i < items.length; i++) {
-      random -= weights[i];
-      if (random <= 0)
-        return items[i];
+      return 1;
+    const lastMatchDate = new Date(stats.last_match);
+    const msSince = Date.now() - lastMatchDate.getTime();
+    const minutesSince = msSince / (1e3 * 60);
+    if (minutesSince < 15)
+      return 0;
+    const hoursSince = minutesSince / 60;
+    let freshness = Math.min(1, 0.1 + hoursSince * 0.075);
+    const matches = stats.total_matches || 0;
+    if (matches < 10) {
+      freshness = Math.min(1, freshness + 0.2);
     }
-    return items[items.length - 1];
+    return freshness;
   }
   function parsePerformerEloData(performer) {
     const defaultStats = {
@@ -759,16 +912,6 @@
     newStats.worst_streak = Math.min(currentStats.worst_streak || 0, newStats.current_streak);
     return newStats;
   }
-  function getKFactor(currentRating, matchCount = null, mode = "swiss") {
-    let baseK;
-    if (matchCount !== null) {
-      baseK = matchCount < 10 ? 16 : matchCount < 30 ? 12 : 8;
-    } else {
-      const dist = Math.abs(currentRating - 50);
-      baseK = dist < 10 ? 12 : dist < 25 ? 10 : 8;
-    }
-    return mode === "champion" ? Math.max(1, Math.round(baseK * 0.5)) : baseK;
-  }
   function isActiveParticipant(performerId, mode, gauntletChampion, gauntletFallingItem) {
     if (mode === "swiss" || mode === "champion")
       return true;
@@ -777,40 +920,79 @@
     }
     return false;
   }
+  function getUnderdogMultiplier(rating, opponentRating) {
+    const ratingDiff = opponentRating - rating;
+    if (ratingDiff > 30)
+      return 1.5;
+    if (ratingDiff > 20)
+      return 1.3;
+    if (ratingDiff > 10)
+      return 1.1;
+    return 1;
+  }
   function calculateMatchOutcome({
     winnerRating,
     loserRating,
     mode,
     winnerMatchCount,
     loserMatchCount,
-    isChampionWinner,
-    isFallingWinner,
-    isChampionLoser,
-    isFallingLoser,
-    loserRank
+    winnerStats = {},
+    loserStats = {},
+    isSpecialChallenge = false,
+    specialChallengeRules = null
   }) {
     const ratingDiff = loserRating - winnerRating;
     const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff / 400));
-    let winnerGain = 0;
-    let loserLoss = 0;
-    if (mode === "gauntlet") {
-      const kFactor = getKFactor(winnerRating, winnerMatchCount, "gauntlet");
-      if (isChampionWinner || isFallingWinner) {
-        winnerGain = Math.max(0, Math.round(kFactor * (1 - expectedWinner)));
-      }
-      if (isChampionLoser || isFallingLoser) {
-        loserLoss = Math.max(0, Math.round(kFactor * expectedWinner));
-      }
-      if (loserRank === 1 && !isChampionLoser && !isFallingLoser) {
-        loserLoss = 1;
-      }
+    const winnerK = getProgressiveKFactor(winnerRating, null, winnerMatchCount, mode);
+    const loserK = getProgressiveKFactor(loserRating, null, loserMatchCount, mode);
+    const winnerUnderdogMult = getUnderdogMultiplier(winnerRating, loserRating);
+    let lossProtection = 1;
+    if (isSpecialChallenge) {
+      lossProtection = 0.1;
     } else {
-      const winnerK = getKFactor(winnerRating, winnerMatchCount, mode);
-      const loserK = getKFactor(loserRating, loserMatchCount, mode);
-      winnerGain = Math.max(0, Math.round(winnerK * (1 - expectedWinner)));
-      loserLoss = Math.max(0, Math.round(loserK * expectedWinner));
+      lossProtection = getChallengeProtectionMultiplier(loserRating, winnerRating);
     }
+    let winnerGain = Math.round(winnerK * (1 - expectedWinner) * winnerUnderdogMult);
+    let loserLoss = Math.round(loserK * expectedWinner * lossProtection);
+    if (winnerRating >= 85) {
+      winnerGain = Math.ceil(winnerGain * 0.6);
+    } else if (winnerRating >= 70) {
+      winnerGain = Math.ceil(winnerGain * 0.8);
+    }
+    if (winnerRating < loserRating - 20) {
+      loserLoss = Math.min(loserLoss, 3);
+    } else if (winnerRating - loserRating > 20) {
+      loserLoss = Math.min(loserLoss, 1);
+    }
+    winnerGain = Math.max(1, winnerGain);
+    loserLoss = Math.max(0, loserLoss);
     return { winnerGain, loserLoss };
+  }
+  function getProgressiveKFactor(rating, opponentRating, matchCount, mode = "swiss") {
+    const count = matchCount || 0;
+    const experienceFactor = 0.5 + 0.5 / (1 + Math.exp((count - 18) / 6));
+    let baseK = 32 * experienceFactor;
+    if (rating > 60) {
+      const reductionFactor = Math.max(0.5, 1 - (rating - 60) / 70);
+      baseK *= reductionFactor;
+    }
+    let kFactor = mode === "champion" ? Math.round(baseK * 0.7) : baseK;
+    return Math.min(40, Math.max(6, Math.round(kFactor)));
+  }
+  function getChallengeProtectionMultiplier(rating, opponentRating) {
+    const ratingDiff = opponentRating - rating;
+    if (ratingDiff > 15) {
+      if (ratingDiff > 30) {
+        return 0.7;
+      } else if (ratingDiff > 25) {
+        return 0.8;
+      } else if (ratingDiff > 20) {
+        return 0.85;
+      } else {
+        return 0.9;
+      }
+    }
+    return 1;
   }
   var init_math_utils = __esm({
     "math-utils.js"() {
@@ -861,8 +1043,10 @@
       body: JSON.stringify({ query, variables })
     });
     const result = await response.json();
-    if (result.errors)
-      throw new Error(result.errors[0].message);
+    if (result.errors) {
+      const errorMessages = result.errors.map((error) => error.message).join("; ");
+      throw new Error(`GraphQL Errors: ${errorMessages}`);
+    }
     return result.data;
   }
   async function fetchSceneCount() {
@@ -912,31 +1096,38 @@
     return shuffled.slice(0, 2);
   }
   async function handleComparison(winnerId, loserId, winnerCurrentRating, loserCurrentRating, loserRank = null, winnerObj = null, loserObj = null, isDraw = false) {
-    const winnerRating = winnerCurrentRating || 50;
-    const loserRating = loserCurrentRating || 50;
+    const winnerRating = winnerCurrentRating || 1;
+    const loserRating = loserCurrentRating || 1;
     let freshWinnerObj = winnerObj;
     let freshLoserObj = loserObj;
-    if (state.battleType === "performers") {
+    if (state.battleType === "performers" && (!winnerObj || !loserObj)) {
       const [fetchedWinner, fetchedLoser] = await Promise.all([
-        winnerId ? fetchPerformerById(winnerId) : Promise.resolve(null),
-        loserId ? fetchPerformerById(loserId) : Promise.resolve(null)
+        winnerId && !winnerObj ? fetchPerformerById(winnerId) : Promise.resolve(winnerObj),
+        loserId && !loserObj ? fetchPerformerById(loserId) : Promise.resolve(loserObj)
       ]);
       freshWinnerObj = fetchedWinner || winnerObj;
       freshLoserObj = fetchedLoser || loserObj;
+    } else {
+      freshWinnerObj = winnerObj || freshWinnerObj;
+      freshLoserObj = loserObj || freshLoserObj;
     }
     let winnerMatchCount = 0;
     let loserMatchCount = 0;
+    let winnerStats = {};
+    let loserStats = {};
     if (state.battleType === "performers") {
-      winnerMatchCount = parsePerformerEloData(freshWinnerObj)?.total_matches || 0;
-      loserMatchCount = parsePerformerEloData(freshLoserObj)?.total_matches || 0;
+      winnerStats = parsePerformerEloData(freshWinnerObj) || {};
+      loserStats = parsePerformerEloData(freshLoserObj) || {};
+      winnerMatchCount = winnerStats.total_matches || 0;
+      loserMatchCount = loserStats.total_matches || 0;
     }
     let winnerGain = 0;
     let loserLoss = 0;
     if (isDraw) {
       const ratingDiff2 = loserRating - winnerRating;
       const expectedWinner = 1 / (1 + Math.pow(10, ratingDiff2 / 400));
-      const winnerK = getKFactor(winnerRating, winnerMatchCount, "swiss");
-      const loserK = getKFactor(loserRating, loserMatchCount, "swiss");
+      const winnerK = getProgressiveKFactor(winnerRating, winnerMatchCount, "swiss");
+      const loserK = getProgressiveKFactor(loserRating, loserMatchCount, "swiss");
       winnerGain = Math.round(winnerK * (0.5 - expectedWinner));
       loserLoss = Math.round(loserK * (1 - expectedWinner - 0.5));
     } else {
@@ -954,7 +1145,11 @@
         isFallingWinner,
         isChampionLoser,
         isFallingLoser,
-        loserRank
+        loserRank,
+        winnerStats,
+        loserStats,
+        isSpecialChallenge: state.currentPair?.isSpecialChallenge || false,
+        specialChallengeRules: state.currentPair?.specialChallengeRules || null
       }));
     }
     const newWinnerRating = Math.min(100, Math.max(1, winnerRating + winnerGain));
@@ -972,6 +1167,21 @@
       ...parsePerformerEloData(freshLoserObj),
       performer_record: freshLoserObj.custom_fields?.performer_record
     } : null;
+    function normalizeStatsForStorage(stats) {
+      if (!stats || !stats.performer_record)
+        return stats;
+      let normalizedStats = { ...stats };
+      try {
+        if (typeof normalizedStats.performer_record === "string") {
+          normalizedStats.performer_record = JSON.parse(normalizedStats.performer_record);
+        }
+      } catch (e) {
+        console.warn("[HotOrNot] Failed to parse performer_record for storage:", e);
+      }
+      return normalizedStats;
+    }
+    const normalizedWinnerStats = winnerOldStats ? normalizeStatsForStorage(winnerOldStats) : null;
+    const normalizedLoserStats = loserOldStats ? normalizeStatsForStorage(loserOldStats) : null;
     if (!state.matchHistory)
       state.matchHistory = [];
     state.matchHistory.push({
@@ -979,10 +1189,8 @@
       loserId,
       winnerOldRating: winnerRating,
       loserOldRating: loserRating,
-      winnerOldStats,
-      // This now contains the record list!
-      loserOldStats,
-      // This now contains the record list!
+      winnerOldStats: normalizedWinnerStats,
+      loserOldStats: normalizedLoserStats,
       pairSnapshot: {
         left: state.currentPair.left ? { ...state.currentPair.left } : null,
         right: state.currentPair.right ? { ...state.currentPair.right } : null,
@@ -1009,7 +1217,6 @@
       shouldTrackWinner ? freshWinnerObj : null,
       winnerStatus,
       loserId
-      // Pass the ID instead of the potentially null object
     );
     await updateItemRating(
       loserId,
@@ -1017,7 +1224,6 @@
       shouldTrackLoser ? freshLoserObj : null,
       loserStatus,
       winnerId
-      // Pass the ID instead of the potentially null object
     );
     return {
       newWinnerRating,
@@ -1080,15 +1286,35 @@
     return countResult.findImages.count;
   }
   async function fetchAllPerformerStats() {
-    const result = await graphqlQuery(`
-    query FindAllPerformers($filter: FindFilterType) {
-      findPerformers(filter: $filter) {
-        performers { ${PERFORMER_FRAGMENT} }
+    const allPerformers = [];
+    let currentPage = 1;
+    const pageSize = 1e3;
+    while (true) {
+      const result = await graphqlQuery(`
+      query FindAllPerformers($filter: FindFilterType) {
+        findPerformers(filter: $filter) {
+          performers { ${PERFORMER_FRAGMENT} }
+        }
       }
+    `, {
+        filter: {
+          per_page: pageSize,
+          page: currentPage,
+          sort: "rating",
+          direction: "DESC"
+        }
+      });
+      const performers = result.findPerformers.performers || [];
+      if (performers.length === 0) {
+        break;
+      }
+      allPerformers.push(...performers);
+      if (performers.length < pageSize) {
+        break;
+      }
+      currentPage++;
     }
-  `, { filter: { per_page: -1, sort: "rating", direction: "DESC" } });
-    const performers = result.findPerformers.performers || [];
-    return performers.sort((a, b) => (b.rating100 ?? 50) - (a.rating100 ?? 50));
+    return allPerformers.sort((a, b) => (b.rating100 ?? 1) - (a.rating100 ?? 1));
   }
   async function updateSceneRating(id, rating) {
     await graphqlQuery(`mutation($i: SceneUpdateInput!) { sceneUpdate(input: $i) { id } }`, {
@@ -1101,11 +1327,51 @@
     });
   }
   async function updatePerformerRating(id, rating, performerObj = null, won = null, opponentId = null) {
-    const variables = { id, rating: Math.round(rating), fields: {} };
+    if (!id) {
+      console.error("[HotOrNot] Cannot update performer: ID is missing");
+      return;
+    }
+    let performerName = "Unknown";
+    if (performerObj?.name) {
+      performerName = performerObj.name;
+    } else if (state.currentPair) {
+      if (state.currentPair.left?.id == id)
+        performerName = state.currentPair.left.name;
+      else if (state.currentPair.right?.id == id)
+        performerName = state.currentPair.right.name;
+    }
+    let cleanRating = Math.round(Number(rating));
+    if (isNaN(cleanRating)) {
+      console.warn(`[HotOrNot] Invalid rating for ${id}, falling back to existing data.`);
+      cleanRating = performerObj?.rating100 || 1;
+    }
+    const logColor = won === true ? "#4CAF50" : won === false ? "#F44336" : "#9E9E9E";
+    const statusText = won === true ? "WIN" : won === false ? "LOSS" : "DRAW/UPDATE";
+    const displayRating = (cleanRating / 10).toFixed(1);
+    console.log(
+      `%c[HotOrNot] %cUpdating score for %c[${performerName}]%c. New rating is %c[${displayRating}] %c(${statusText})`,
+      "color: #888; font-weight: bold;",
+      "color: #DDD;",
+      "color: #2196F3; font-weight: bold;",
+      "color: #DDD;",
+      "color: #FFEB3B; font-weight: bold;",
+      `color: ${logColor}; font-style: italic;`
+    );
+    const variables = {
+      id: id.toString(),
+      rating: cleanRating,
+      fields: {}
+    };
     if (performerObj) {
-      const currentStats = parsePerformerEloData(performerObj);
-      const updatedStats = updatePerformerStats(currentStats, won);
-      variables.fields.hotornot_stats = JSON.stringify(updatedStats);
+      try {
+        const currentStats = parsePerformerEloData(performerObj);
+        const updatedStats = updatePerformerStats(currentStats, won);
+        if (updatedStats) {
+          variables.fields.hotornot_stats = JSON.stringify(updatedStats);
+        }
+      } catch (e) {
+        console.error(`[HotOrNot] Stats update failed for ${id}:`, e);
+      }
       let matchHistory = [];
       try {
         const rawRecord = performerObj.custom_fields?.performer_record;
@@ -1113,95 +1379,72 @@
           matchHistory = typeof rawRecord === "string" ? JSON.parse(rawRecord) : rawRecord;
         }
       } catch (e) {
+        console.warn(`[HotOrNot] Failed to parse performer_record for ${id}, resetting history.`);
         matchHistory = [];
       }
       let opponentData = "0:Unknown";
       if (opponentId) {
         if (typeof opponentId === "string" && opponentId.includes(":")) {
           opponentData = opponentId;
-        } else if (typeof opponentId === "string" || typeof opponentId === "number") {
-          let cleanId = opponentId.toString().replace(/^.*?(\d+).*$/, "$1");
-          if (cleanId && cleanId !== "0") {
-            let opponentName = "Unknown";
-            if (state.currentPair) {
-              if (state.currentPair.left && state.currentPair.left.id == cleanId) {
-                opponentName = state.currentPair.left.name || `Performer #${cleanId}`;
-              } else if (state.currentPair.right && state.currentPair.right.id == cleanId) {
-                opponentName = state.currentPair.right.name || `Performer #${cleanId}`;
-              }
-            }
-            if (opponentName === "Unknown" && state.gauntletChampion && state.gauntletChampion.id == cleanId) {
-              opponentName = state.gauntletChampion.name || `Performer #${cleanId}`;
-            }
-            if (opponentName === "Unknown") {
-              try {
-                const opponentPerformer = await fetchPerformerById(cleanId);
-                if (opponentPerformer) {
-                  opponentName = opponentPerformer.name || `Performer #${cleanId}`;
-                }
-              } catch (e) {
-                console.warn(`[HotOrNot] Failed to fetch opponent ${cleanId}:`, e);
-              }
-            }
-            opponentData = `${cleanId}:${opponentName}`;
+        } else {
+          const oppId = (typeof opponentId === "object" ? opponentId.id : opponentId).toString().replace(/\D/g, "");
+          let oppName = "Unknown";
+          if (opponentId.name) {
+            oppName = opponentId.name;
+          } else if (state.currentPair) {
+            if (state.currentPair.left?.id == oppId)
+              oppName = state.currentPair.left.name;
+            else if (state.currentPair.right?.id == oppId)
+              oppName = state.currentPair.right.name;
           }
-        } else if (typeof opponentId === "object") {
-          const oppId = opponentId.id || "0";
-          let oppName = opponentId.name || "Unknown";
-          if (oppName === "Unknown") {
-            if (state.currentPair) {
-              if (opponentId === state.currentPair.left) {
-                oppName = state.currentPair.left.name || `Performer #${oppId}`;
-              } else if (opponentId === state.currentPair.right) {
-                oppName = state.currentPair.right.name || `Performer #${oppId}`;
-              }
-            }
-            if (oppName === "Unknown" && state.gauntletChampion && opponentId === state.gauntletChampion) {
-              oppName = state.gauntletChampion.name || `Performer #${oppId}`;
-            }
-          }
-          if (oppName === "Unknown" && oppId && oppId !== "0") {
-            try {
-              const opponentPerformer = await fetchPerformerById(oppId);
-              if (opponentPerformer) {
-                oppName = opponentPerformer.name || `Performer #${oppId}`;
-              }
-            } catch (e) {
-              console.warn(`[HotOrNot] Failed to fetch opponent ${oppId}:`, e);
-            }
-          }
-          if (oppId && oppId !== "0") {
-            opponentData = `${oppId}:${oppName}`;
-          }
+          opponentData = `${oppId}:${oppName || "Unknown"}`;
         }
       }
       matchHistory.push({
         date: (/* @__PURE__ */ new Date()).toISOString(),
         opponent: opponentData,
         won,
-        ratingAfter: Math.round(rating)
+        ratingAfter: cleanRating
       });
       if (matchHistory.length > 30)
         matchHistory = matchHistory.slice(-30);
       variables.fields.performer_record = JSON.stringify(matchHistory);
     }
-    await graphqlQuery(`
-    mutation($id: ID!, $rating: Int!, $fields: Map) {
-      performerUpdate(input: { 
-        id: $id, 
-        rating100: $rating, 
-        custom_fields: { partial: $fields } 
-      }) { 
-        id 
-      }
-    }`, variables);
+    variables.fields = variables.fields || {};
+    try {
+      return await graphqlQuery(`
+      mutation($id: ID!, $rating: Int!, $fields: Map) {
+        performerUpdate(input: { 
+          id: $id, 
+          rating100: $rating, 
+          custom_fields: { partial: $fields } 
+        }) { 
+          id 
+        }
+      }`, variables);
+    } catch (err) {
+      console.error(`[HotOrNot] GraphQL Update Failed for ${id}:`, err);
+      throw err;
+    }
   }
   async function undoLastMatch() {
-    if (!state.matchHistory || state.matchHistory.length === 0)
+    if (!state.matchHistory || state.matchHistory.length === 0) {
+      console.log("[HotOrNot] No match history to undo");
       return null;
+    }
     const last = state.matchHistory.pop();
-    await updateItemRatingDirect(last.winnerId, last.winnerOldRating, last.winnerOldStats);
-    await updateItemRatingDirect(last.loserId, last.loserOldRating, last.loserOldStats);
+    console.log("[HotOrNot] Undoing match:", last);
+    try {
+      await Promise.all([
+        updateItemRatingDirect(last.winnerId, last.winnerOldRating, last.winnerOldStats),
+        updateItemRatingDirect(last.loserId, last.loserOldRating, last.loserOldStats)
+      ]);
+      console.log("[HotOrNot] Successfully restored ratings");
+    } catch (error) {
+      state.matchHistory.push(last);
+      console.error("[HotOrNot] Failed to restore ratings:", error);
+      throw new Error(`Failed to undo match: ${error.message}`);
+    }
     if (last.gauntletSnapshot) {
       const snap = last.gauntletSnapshot;
       state.gauntletChampion = snap.gauntletChampion;
@@ -1209,23 +1452,34 @@
       state.gauntletDefeated = [...snap.gauntletDefeated];
       state.gauntletFalling = snap.gauntletFalling;
       state.gauntletFallingItem = snap.gauntletFallingItem;
+      console.log("[HotOrNot] Restored gauntlet state");
     }
+    let restoredPairSnapshot = null;
     if (last.pairSnapshot) {
       const { left, right } = last.pairSnapshot;
       state.currentPair = { left, right };
       state.currentRanks = { left: last.pairSnapshot.rankLeft, right: last.pairSnapshot.rankRight };
+      restoredPairSnapshot = last.pairSnapshot;
+      console.log("[HotOrNot] Restored pair snapshot");
     }
-    return last.pairSnapshot || null;
+    return restoredPairSnapshot || null;
   }
   async function updateItemRatingDirect(itemId, rating, statsObj) {
     if (state.battleType === "performers") {
       const fields = {};
       if (statsObj) {
         fields.hotornot_stats = JSON.stringify(statsObj);
-        if (statsObj.performer_record) {
-          fields.performer_record = typeof statsObj.performer_record === "string" ? statsObj.performer_record : JSON.stringify(statsObj.performer_record);
+        if ("performer_record" in statsObj) {
+          const recordData = statsObj.performer_record;
+          console.log(`[HotOrNot] Restoring performer_record for ${itemId}:`, recordData);
+          if (recordData !== void 0 && recordData !== null) {
+            fields.performer_record = Array.isArray(recordData) ? JSON.stringify(recordData) : recordData;
+          } else {
+            fields.performer_record = "[]";
+          }
         }
       }
+      console.log(`[HotOrNot] Restoring performer ${itemId} with fields:`, fields);
       await graphqlQuery(`
       mutation($id: ID!, $rating: Int!, $fields: Map) {
         performerUpdate(input: { 
@@ -1260,7 +1514,7 @@
   async function getPerformerBattleRank(performerId) {
     try {
       const target = await fetchPerformerById(performerId);
-      if (!target || target.rating100 === null)
+      if (!target || target.rating100 === null || target.rating100 === 1)
         return null;
       const currentRating = target.rating100;
       const rankResult = await graphqlQuery(`
@@ -1293,7 +1547,7 @@
       init_math_utils();
       init_state();
       SCENE_FRAGMENT = `id title date rating100 paths { screenshot preview } files { duration path } studio { name } performers { name } tags { name }`;
-      PERFORMER_FRAGMENT = `id name image_path rating100 details custom_fields birthdate ethnicity country gender`;
+      PERFORMER_FRAGMENT = `id name image_path rating100 details custom_fields birthdate ethnicity country gender height_cm measurements fake_tits scene_count image_count gallery_count tags { name }`;
       IMAGE_FRAGMENT = `id rating100 paths { thumbnail image }`;
       pluginConfigCache = null;
     }
@@ -1303,6 +1557,7 @@
   var gauntlet_selection_exports = {};
   __export(gauntlet_selection_exports, {
     fetchPerformersForSelection: () => fetchPerformersForSelection,
+    hidePerformerSelection: () => hidePerformerSelection,
     loadPerformerSelection: () => loadPerformerSelection,
     showPerformerSelection: () => showPerformerSelection,
     showPlacementScreen: () => showPlacementScreen
@@ -1388,6 +1643,22 @@
       modal.classList.add("hon-mode-gauntlet");
     }
   }
+  function hidePerformerSelection() {
+    const selectionContainer = document.getElementById("hon-performer-selection");
+    const comparisonArea = document.getElementById("hon-comparison-area");
+    const actionsEl = document.querySelector(".hon-actions");
+    if (selectionContainer)
+      selectionContainer.style.display = "none";
+    if (comparisonArea)
+      comparisonArea.style.display = "";
+    if (actionsEl)
+      actionsEl.style.display = "";
+    const modal = document.getElementById("hon-modal");
+    if (modal) {
+      modal.classList.remove("hon-mode-gauntlet");
+      modal.classList.add(`hon-mode-${state.currentMode}`);
+    }
+  }
   function showPlacementScreen(item, rank, finalRating) {
     const comparisonArea = document.getElementById("hon-comparison-area");
     if (!comparisonArea)
@@ -1470,8 +1741,8 @@
     const loserId = loserItem.id;
     const winnerCard = body.closest(".hon-scene-card");
     const loserCard = document.querySelector(`[data-performer-id="${loserId}"], [data-scene-id="${loserId}"], [data-image-id="${loserId}"]`);
-    const winnerRating = parseInt(winnerCard.dataset.rating) || 50;
-    const loserRating = parseInt(loserCard?.dataset.rating) || 50;
+    const winnerRating = parseInt(winnerCard.dataset.rating) || 1;
+    const loserRating = parseInt(loserCard?.dataset.rating) || 1;
     const loserRank = isLeftWinner ? state.currentRanks.right : state.currentRanks.left;
     if (state.battleType === "images") {
       const outcome2 = await handleComparison(winnerId, loserId, winnerRating, loserRating, null, winnerItem, loserItem);
@@ -1564,8 +1835,14 @@
     const left = state.currentPair?.left;
     const right = state.currentPair?.right;
     if (left && right) {
-      const leftRating = left.rating100 || 50;
-      const rightRating = right.rating100 || 50;
+      const pairKey = [left.id, right.id].sort().join("-");
+      state.seenPairs.add(pairKey);
+      if (state.seenPairs.size > 1e3) {
+        const pairsArray = Array.from(state.seenPairs);
+        state.seenPairs = new Set(pairsArray.slice(500));
+      }
+      const leftRating = left.rating100 || 1;
+      const rightRating = right.rating100 || 1;
       await handleComparison(
         left.id,
         right.id,
@@ -1579,7 +1856,10 @@
       );
     }
     if (state.currentMode === "gauntlet" && right) {
-      state.skippedId = right.id;
+      state.skippedIds.push(right.id);
+      if (state.skippedIds.length > 10) {
+        state.skippedIds.shift();
+      }
       console.log(`[HotOrNot] Skipping Gauntlet opponent: ${right.name}`);
     }
     loadNewPair();
@@ -1595,29 +1875,38 @@
       undoBtn.textContent = "Undoing\u2026";
     }
     try {
+      console.log("[HotOrNot] Starting undo operation...");
       const pairSnapshot = await undoLastMatch();
       if (pairSnapshot?.left && pairSnapshot?.right) {
+        console.log("[HotOrNot] Re-rendering previous pair from snapshot");
         const { renderCard: renderCard2 } = await Promise.resolve().then(() => (init_ui_manager(), ui_manager_exports));
-        const { attachBattleListenersExternal: attachBattleListenersExternal2 } = await Promise.resolve().then(() => (init_battle_engine(), battle_engine_exports));
+        const { attachBattleListeners: attachBattleListeners2 } = await Promise.resolve().then(() => (init_battle_engine(), battle_engine_exports));
         const area = document.getElementById("hon-comparison-area");
         if (area) {
           state.disableChoice = false;
           area.innerHTML = `
-          <div class="hon-vs-container">
-            ${renderCard2(pairSnapshot.left, "left", pairSnapshot.rankLeft)}
-            <div class="hon-vs-divider"><span>VS</span></div>
-            ${renderCard2(pairSnapshot.right, "right", pairSnapshot.rankRight)}
-          </div>
-        `;
-          attachBattleListenersExternal2(area);
+		<div class="hon-vs-container">
+		  ${renderCard2(pairSnapshot.left, "left", pairSnapshot.rankLeft)}
+		  <div class="hon-vs-divider"><span>VS</span></div>
+		  ${renderCard2(pairSnapshot.right, "right", pairSnapshot.rankRight)}
+		</div>
+	  `;
+          attachBattleListeners2(area);
         }
         console.log("[HotOrNot] Undo successful \u2014 previous pair restored.");
       } else {
+        console.log("[HotOrNot] No snapshot available, loading fresh pair");
         loadNewPair();
       }
     } catch (err) {
       console.error("[HotOrNot] Undo failed:", err);
-      loadNewPair();
+      const area = document.getElementById("hon-comparison-area");
+      if (area) {
+        area.innerHTML = `<div class="hon-error">Undo failed: ${err.message}</div>`;
+      }
+      setTimeout(() => {
+        loadNewPair();
+      }, 2e3);
     } finally {
       const btn = document.getElementById("hon-undo-btn");
       if (btn) {
@@ -1657,7 +1946,7 @@
   // battle-engine.js
   var battle_engine_exports = {};
   __export(battle_engine_exports, {
-    attachBattleListenersExternal: () => attachBattleListenersExternal,
+    attachBattleListeners: () => attachBattleListeners,
     fetchChampionPairPerformers: () => fetchChampionPairPerformers,
     fetchChampionPairScenes: () => fetchChampionPairScenes,
     fetchGauntletPairPerformers: () => fetchGauntletPairPerformers,
@@ -1666,9 +1955,43 @@
     fetchSwissPairImages: () => fetchSwissPairImages,
     fetchSwissPairPerformers: () => fetchSwissPairPerformers,
     fetchSwissPairScenes: () => fetchSwissPairScenes,
+    getRatingTier: () => getRatingTier2,
     handleMatchmakingLogic: () => handleMatchmakingLogic,
     loadNewPair: () => loadNewPair
   });
+  function attachBattleListeners(area) {
+    area.querySelectorAll(".hon-scene-body").forEach((body) => {
+      body.onclick = (e) => handleChooseItem(e);
+    });
+    area.querySelectorAll(".hon-scene-card").forEach((card) => {
+      const video = card.querySelector(".hon-hover-preview");
+      if (!video)
+        return;
+      card.onmouseenter = () => video.play().catch(() => {
+      });
+      card.onmouseleave = () => {
+        video.pause();
+        video.currentTime = 0;
+      };
+    });
+    area.querySelectorAll(".hon-tags-more").forEach((tagElement) => {
+      tagElement.onclick = function(e) {
+        e.stopPropagation();
+        const container = this.parentElement;
+        const displayedTags = container.querySelector(".hon-tags-displayed");
+        const ellipsis = container.querySelector(".hon-tags-ellipsis");
+        const moreLink = this;
+        const expandedTags = container.querySelector(".hon-tags-expanded");
+        if (displayedTags)
+          displayedTags.style.display = "none";
+        if (ellipsis)
+          ellipsis.style.display = "none";
+        moreLink.style.display = "none";
+        if (expandedTags)
+          expandedTags.style.display = "inline";
+      };
+    });
+  }
   async function fetchPair() {
     const { battleType, currentMode } = state;
     if (currentMode === "swiss") {
@@ -1734,24 +2057,18 @@
       area.innerHTML = `<div class="hon-error">Error: ${err.message}</div>`;
     }
   }
-  function attachBattleListeners(area) {
-    attachBattleListenersExternal(area);
+  function shouldForceCrossTierMatch() {
+    return Math.random() < 0.1;
   }
-  function attachBattleListenersExternal(area) {
-    area.querySelectorAll(".hon-scene-body").forEach((body) => {
-      body.onclick = (e) => handleChooseItem(e);
-    });
-    area.querySelectorAll(".hon-scene-card").forEach((card) => {
-      const video = card.querySelector(".hon-hover-preview");
-      if (!video)
-        return;
-      card.onmouseenter = () => video.play().catch(() => {
-      });
-      card.onmouseleave = () => {
-        video.pause();
-        video.currentTime = 0;
-      };
-    });
+  function getCrossTierOpponent(allPerformers, targetPerformer) {
+    const targetRating = targetPerformer.rating100 || 1;
+    const crossTierCandidates = allPerformers.filter(
+      (p) => p.id !== targetPerformer.id && (p.rating100 || 1) >= targetRating + 20
+    );
+    if (crossTierCandidates.length > 0) {
+      return crossTierCandidates[Math.floor(Math.random() * crossTierCandidates.length)];
+    }
+    return null;
   }
   function attachVictoryHandlers(area) {
     const btn = area.querySelector("#hon-new-gauntlet");
@@ -1784,13 +2101,20 @@
     if (images.length < 2)
       return { items: await fetchRandomImages(2), ranks: [null, null] };
     const image1 = images[Math.floor(Math.random() * images.length)];
-    const rating1 = image1.rating100 || 50;
-    const matchWindow = images.length > 50 ? 10 : 20;
-    const similar = images.filter((s) => s.id !== image1.id && Math.abs((s.rating100 || 50) - rating1) <= matchWindow);
+    const rating1 = image1.rating100 || 1;
+    const matchWindow = images.length > 1 ? 10 : 20;
+    const similar = images.filter((s) => s.id !== image1.id && Math.abs((s.rating100 || 1) - rating1) <= matchWindow);
     const image2 = similar.length > 0 ? similar[Math.floor(Math.random() * similar.length)] : images.filter((s) => s.id !== image1.id)[0];
+    let ranks = [null, null];
+    if (!useSampling && images.length > 0) {
+      const sortedImages = [...images].sort((a, b) => (b.rating100 || 0) - (a.rating100 || 0));
+      const rank1 = sortedImages.findIndex((img) => img.id === image1.id) + 1;
+      const rank2 = sortedImages.findIndex((img) => img.id === image2.id) + 1;
+      ranks = [rank1 || null, rank2 || null];
+    }
     return {
       items: [image1, image2],
-      ranks: useSampling ? [null, null] : [images.indexOf(image1) + 1, images.indexOf(image2) + 1]
+      ranks
     };
   }
   async function fetchSwissPairScenes() {
@@ -1801,9 +2125,9 @@
     if (scenes.length < 2)
       return { items: await fetchRandomScenes(2), ranks: [null, null] };
     const scene1 = scenes[Math.floor(Math.random() * scenes.length)];
-    const rating1 = scene1.rating100 || 50;
-    const matchWindow = scenes.length > 50 ? 10 : 20;
-    const similar = scenes.filter((s) => s.id !== scene1.id && Math.abs((s.rating100 || 50) - rating1) <= matchWindow);
+    const rating1 = scene1.rating100 || 1;
+    const matchWindow = scenes.length > 1 ? 10 : 20;
+    const similar = scenes.filter((s) => s.id !== scene1.id && Math.abs((s.rating100 || 1) - rating1) <= matchWindow);
     const scene2 = similar.length > 0 ? similar[Math.floor(Math.random() * similar.length)] : scenes.find((s) => s.id !== scene1.id);
     return { items: [scene1, scene2], ranks: [scenes.indexOf(scene1) + 1, scenes.indexOf(scene2) + 1] };
   }
@@ -1817,20 +2141,104 @@
       return { items: await fetchRandomScenes(2), ranks: [null, null], isVictory: false };
     return handleMatchmakingLogic(scenes, "scenes");
   }
+  function canBattleByTier(tier1, tier2) {
+    const eliteTiers = ["S-Tier", "A-Tier", "B-Tier"];
+    if (tier1 === "S-Tier")
+      return eliteTiers.includes(tier2);
+    if (tier2 === "S-Tier")
+      return eliteTiers.includes(tier1);
+    return true;
+  }
+  function getRatingTier2(rating) {
+    if (rating >= 85)
+      return "S-Tier";
+    if (rating >= 70)
+      return "A-Tier";
+    if (rating >= 55)
+      return "B-Tier";
+    if (rating >= 40)
+      return "C-Tier";
+    if (rating >= 25)
+      return "D-Tier";
+    return "F-Tier";
+  }
   async function fetchSwissPairPerformers() {
     const performerFilter = getPerformerFilter(state.cachedUrlFilter, state.selectedGenders);
-    const result = await graphqlQuery(`query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
-    findPerformers(performer_filter: $performer_filter, filter: $filter) { performers { ${PERFORMER_FRAGMENT} } }
-  }`, { performer_filter: performerFilter, filter: { per_page: -1, sort: "rating", direction: "DESC" } });
+    const query = `query FindPerformersByRating($performer_filter: PerformerFilterType, $filter: FindFilterType) {
+    findPerformers(performer_filter: $performer_filter, filter: $filter) { 
+      count, 
+      performers { ${PERFORMER_FRAGMENT} } 
+    }
+  }`;
+    const result = await graphqlQuery(query, {
+      performer_filter: performerFilter,
+      filter: { per_page: -1, sort: "rating", direction: "DESC" }
+    });
     const performers = result.findPerformers.performers || [];
+    state.totalItemsCount = performers.length;
     if (performers.length < 2)
       return { items: await fetchRandomPerformers(2), ranks: [null, null] };
-    const weightedList = performers.map((p, idx) => ({ p, weight: getRecencyWeight(p), idx }));
-    const s1 = weightedRandomSelect(weightedList, weightedList.map((item) => item.weight));
-    const rating1 = s1.p.rating100 || 50;
-    const similar = weightedList.filter((item) => item.p.id !== s1.p.id && Math.abs((item.p.rating100 || 50) - rating1) <= 15);
-    const s2 = similar.length > 0 ? weightedRandomSelect(similar, similar.map((i) => i.weight)) : weightedList.find((i) => i.p.id !== s1.p.id);
-    return { items: [s1.p, s2.p], ranks: [s1.idx + 1, s2.idx + 1] };
+    const logMatch = (type, p1, p2, w1, w2, color) => {
+      const r1 = ((p1.rating100 || 0) / 10).toFixed(1);
+      const r2 = ((p2.rating100 || 0) / 10).toFixed(1);
+      console.log(
+        `%c[HotorNot] ${type}: %c${p1.name || "???"} (w:${w1.toFixed(2)}) [${r1}] %cvs %c${p2.name || "???"} (w:${w2.toFixed(2)}) [${r2}]`,
+        "color: #888; font-weight: bold;",
+        `color: ${color}; font-weight: bold;`,
+        "color: #888;",
+        `color: ${color}; font-weight: bold;`
+      );
+    };
+    const sortedPool = performers.map((p) => ({
+      p,
+      // Cubing the weight makes recency very aggressive
+      weight: Math.pow(getRecencyWeight(p), 3) + Math.random() * 0.01,
+      rating: p.rating100 || 1
+    })).filter((item) => {
+      const stats = parsePerformerEloData(item.p);
+      return stats.total_matches === 0 || item.weight > 0.01;
+    }).sort((a, b) => b.weight - a.weight);
+    const seed = sortedPool[Math.floor(Math.random() * Math.min(sortedPool.length, 10))];
+    const tier1 = getRatingTier2(seed.rating);
+    if (shouldForceCrossTierMatch()) {
+      const challenger = getCrossTierOpponent(performers, seed.p);
+      if (challenger && canBattleByTier(tier1, getRatingTier2(challenger.rating100 || 0))) {
+        logMatch("CROSS-TIER", seed.p, challenger, seed.weight, getRecencyWeight(challenger), "#E91E63");
+        const rank12 = getPerformerRankInList(seed.p, performers);
+        const rank22 = getPerformerRankInList(challenger, performers);
+        return { items: [seed.p, challenger], ranks: [rank12, rank22] };
+      }
+    }
+    const validOpponents = sortedPool.filter((item) => {
+      if (item.p.id === seed.p.id)
+        return false;
+      const pointDiff = Math.abs(seed.rating - item.rating);
+      return pointDiff <= 15 && canBattleByTier(tier1, getRatingTier2(item.rating));
+    });
+    if (validOpponents.length > 0) {
+      const opponent = validOpponents[Math.floor(Math.random() * Math.min(validOpponents.length, 3))];
+      logMatch("RANGE-VALID", seed.p, opponent.p, seed.weight, opponent.weight, "#2196F3");
+      const rank12 = getPerformerRankInList(seed.p, performers);
+      const rank22 = getPerformerRankInList(opponent.p, performers);
+      return { items: [seed.p, opponent.p], ranks: [rank12, rank22] };
+    }
+    const fallback = sortedPool.find((item) => item.p.id !== seed.p.id) || sortedPool[0];
+    logMatch("FALLBACK", seed.p, fallback.p, seed.weight, fallback.weight, "#F44336");
+    const rank1 = getPerformerRankInList(seed.p, performers);
+    const rank2 = getPerformerRankInList(fallback.p, performers);
+    return { items: [seed.p, fallback.p], ranks: [rank1, rank2] };
+  }
+  function getPerformerRankInList(performer, allPerformers) {
+    if (!performer || performer.rating100 === null || performer.rating100 === 1)
+      return null;
+    try {
+      const sorted = [...allPerformers].filter((p) => p.rating100 !== null && p.rating100 > 1).sort((a, b) => (b.rating100 || 0) - (a.rating100 || 0));
+      const index = sorted.findIndex((p) => p.id === performer.id);
+      return index >= 0 ? index + 1 : null;
+    } catch (err) {
+      console.warn("[HotOrNot] Could not calculate rank for performer:", performer.id, err);
+      return null;
+    }
   }
   async function fetchGauntletPairPerformers() {
     const gender = state.gauntletChampion?.gender || state.selectedGenders[0];
@@ -1877,27 +2285,58 @@
     if (!state.gauntletChampion) {
       console.warn("[HotOrNot] No champion selected, picking a random starter.");
       const randomStarter = list[Math.floor(Math.random() * list.length)];
-      return { items: [randomStarter, list.find((i) => i.id !== randomStarter.id)], ranks: [null, null], isVictory: false };
+      let candidate = list.find((i) => i.id !== randomStarter.id);
+      if (state.seenPairs && state.seenPairs.size > 0) {
+        const candidates = list.filter(
+          (i) => i.id !== randomStarter.id && !hasBeenRecentlyPaired(randomStarter.id, i.id)
+        );
+        if (candidates.length > 0) {
+          candidate = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+      }
+      return {
+        items: [randomStarter, candidate || list.find((i) => i.id !== randomStarter.id)],
+        ranks: [null, null],
+        isVictory: false
+      };
     }
     const champIdx = list.findIndex((i) => i.id === state.gauntletChampion.id);
     let potentialOpponents = list.filter(
-      (item, idx) => idx < champIdx && !state.gauntletDefeated.includes(item.id) && item.id !== state.skippedId
+      (item, idx) => idx < champIdx && !state.gauntletDefeated.includes(item.id) && !state.skippedIds.includes(item.id) && // Don't rematch skipped opponents
+      !hasBeenRecentlyPaired(state.gauntletChampion.id, item.id)
+      // Avoid recent pairs
     );
     if (potentialOpponents.length === 0) {
-      if (state.skippedId) {
-        state.skippedId = null;
+      if (state.skippedIds.length > 0) {
+        state.skippedIds = [];
         return handleMatchmakingLogic(list, type);
       }
       return { items: [state.gauntletChampion], ranks: [1], isVictory: true };
     }
     const proximityWindow = Math.min(5, potentialOpponents.length);
-    const randomIdx = Math.floor(Math.random() * proximityWindow);
-    const nextOpponent = potentialOpponents[potentialOpponents.length - 1 - randomIdx];
+    let filteredOpponents = potentialOpponents.slice(-proximityWindow).filter(
+      (opponent) => !hasBeenRecentlyPaired(state.gauntletChampion.id, opponent.id)
+    );
+    if (filteredOpponents.length === 0) {
+      filteredOpponents = potentialOpponents.slice(-proximityWindow);
+    }
+    const randomIdx = Math.floor(Math.random() * filteredOpponents.length);
+    const nextOpponent = filteredOpponents[randomIdx];
+    const pairKey = [state.gauntletChampion.id, nextOpponent.id].sort().join("-");
+    if (state.seenPairs) {
+      state.seenPairs.add(pairKey);
+    }
     return {
       items: [state.gauntletChampion, nextOpponent],
       ranks: [champIdx + 1, list.indexOf(nextOpponent) + 1],
       isVictory: false
     };
+  }
+  function hasBeenRecentlyPaired(id1, id2) {
+    if (!state.seenPairs)
+      return false;
+    const pairKey = [id1, id2].sort().join("-");
+    return state.seenPairs.has(pairKey);
   }
   var init_battle_engine = __esm({
     "battle-engine.js"() {
@@ -1919,6 +2358,37 @@
     generateStatTables: () => generateStatTables,
     openStatsModal: () => openStatsModal
   });
+  function getRatingTier3(rating) {
+    if (rating >= 85)
+      return "S-Tier";
+    if (rating >= 70)
+      return "A-Tier";
+    if (rating >= 55)
+      return "B-Tier";
+    if (rating >= 40)
+      return "C-Tier";
+    if (rating >= 25)
+      return "D-Tier";
+    return "F-Tier";
+  }
+  function getTierColor2(tier) {
+    switch (tier) {
+      case "S-Tier":
+        return "#eb9834";
+      case "A-Tier":
+        return "#e014aa";
+      case "B-Tier":
+        return "#7f1e82";
+      case "C-Tier":
+        return "#14bbe0";
+      case "D-Tier":
+        return "#92e014";
+      case "F-Tier":
+        return "#808080";
+      default:
+        return "#000000";
+    }
+  }
   async function openStatsModal() {
     const existingStatsModal = document.getElementById("hon-stats-modal");
     if (existingStatsModal)
@@ -1950,6 +2420,7 @@
       dialogContainer.querySelector(".hon-modal-close").addEventListener("click", closeStats);
       initStatsTabs(dialogContainer);
       initStatsCollapsibles(dialogContainer);
+      initStatsSorting(dialogContainer);
     } catch (error) {
       console.error("[HotOrNot] Error loading stats:", error);
       dialogContainer.innerHTML = `
@@ -1965,7 +2436,7 @@
     }
     const processedPerformers = performers.map((p, idx) => {
       const stats = parsePerformerEloData(p);
-      const rawRating = p.rating100 ?? 50;
+      const rawRating = p.rating100 ?? 1;
       return {
         ...stats,
         rank: idx + 1,
@@ -1977,7 +2448,7 @@
     const rankGroupsHTML = generateStatTables(processedPerformers);
     const ratingBuckets = new Array(101).fill(0);
     performers.forEach((p) => {
-      const r = p.rating100 ?? 50;
+      const r = p.rating100 ?? 1;
       if (r >= 0 && r <= 100)
         ratingBuckets[r]++;
     });
@@ -2002,20 +2473,50 @@
   `;
   }
   function generateStatTables(processedPerformers) {
-    const groups = [];
-    const groupSize = 250;
-    for (let i = 0; i < processedPerformers.length; i += groupSize) {
-      const chunk = processedPerformers.slice(i, i + groupSize);
-      const startRank = i + 1;
-      const endRank = Math.min(i + groupSize, processedPerformers.length);
-      const rows = chunk.map((p) => {
-        const winRate = p.total_matches > 0 ? (p.wins / p.total_matches * 100).toFixed(1) : "N/A";
+    const tierGroups = {};
+    processedPerformers.forEach((p) => {
+      const numericRating = parseFloat(p.rating) * 10;
+      const tier = getRatingTier3(numericRating);
+      if (!tierGroups[tier]) {
+        tierGroups[tier] = [];
+      }
+      tierGroups[tier].push(p);
+    });
+    const sortedTiers = Object.keys(tierGroups).sort((a, b) => {
+      const tierValues = {
+        "S-Tier": 5,
+        "A-Tier": 4,
+        "B-Tier": 3,
+        "C-Tier": 2,
+        "D-Tier": 1,
+        "F-Tier": 0
+      };
+      return tierValues[b] - tierValues[a];
+    });
+    return sortedTiers.map((tier) => {
+      const performersInTier = tierGroups[tier];
+      const tierColor = getTierColor2(tier);
+      const rows = performersInTier.map((p) => {
+        const winRate = p.total_matches > 0 ? (p.wins / p.total_matches * 100).toFixed(1) : "0.0";
         const streakDisplay = p.current_streak > 0 ? `<span class="hon-stats-positive">+${p.current_streak}</span>` : p.current_streak < 0 ? `<span class="hon-stats-negative">${p.current_streak}</span>` : "0";
         return `
-        <tr>
+        <tr data-rank="${p.rank}" 
+            data-rating="${parseFloat(p.rating)}" 
+            data-matches="${p.total_matches}" 
+            data-wins="${p.wins}" 
+            data-losses="${p.losses}" 
+            data-draws="${p.draws || 0}" 
+            data-winrate="${winRate}" 
+            data-streak="${p.current_streak}" 
+            data-beststreak="${p.best_streak}" 
+            data-worststreak="${p.worst_streak}">
           <td class="hon-stats-rank">#${p.rank}</td>
-          <td class="hon-stats-name"><a href="/performers/${p.id}" target="_blank">${escapeHtml(p.name)}</a></td>
-          <td class="hon-stats-rating">${p.rating}</td>
+          <td class="hon-stats-name">
+            <a href="/performers/${p.id}" target="_blank">${escapeHtml(p.name)}</a>
+          </td>
+          <td class="hon-stats-rating" style="color: ${tierColor}; font-weight: bold;">
+            ${p.rating}
+          </td>
           <td>${p.total_matches}</td>
           <td class="hon-stats-positive">${p.wins}</td>
           <td class="hon-stats-negative">${p.losses}</td>
@@ -2026,64 +2527,101 @@
           <td class="hon-stats-negative">${p.worst_streak}</td>
         </tr>`;
       }).join("");
-      groups.push(`
+      return `
       <div class="hon-rank-group">
-        <div class="hon-rank-group-header" data-group="${i}" role="button">
+        <div class="hon-rank-group-header" data-group="${tier}" role="button">
           <span class="hon-group-toggle">\u25B6</span>
-          <span class="hon-rank-group-title">Ranks ${startRank}-${endRank}</span>
+          <span class="hon-rank-group-title" style="color: ${tierColor}; font-weight: bold;">
+            ${tier} Performers (${performersInTier.length})
+          </span>
         </div>
-        <div class="hon-rank-group-content collapsed" data-group="${i}">
+        <div class="hon-rank-group-content collapsed" data-group="${tier}">
           <table class="hon-stats-table">
             <thead>
               <tr>
-                <th>Rank</th><th>Name</th><th>Rating</th><th>Matches</th>
-                <th>W</th><th>L</th><th>D</th><th>%</th>
-                <th>Streak</th><th>Best</th><th>Worst</th>
+                <th data-sort="rank">Rank</th>
+                <th data-sort="name">Name</th>
+                <th data-sort="rating">Rating</th>
+                <th data-sort="matches">Matches</th>
+                <th data-sort="wins">W</th>
+                <th data-sort="losses">L</th>
+                <th data-sort="draws">D</th>
+                <th data-sort="winrate">%</th>
+                <th data-sort="streak">Streak</th>
+                <th data-sort="beststreak">Best</th>
+                <th data-sort="worststreak">Worst</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
-      </div>`);
-    }
-    return groups.join("");
+      </div>`;
+    }).join("");
+  }
+  function initStatsSorting(dialog) {
+    const headers = dialog.querySelectorAll(".hon-stats-table th[data-sort]");
+    headers.forEach((header) => {
+      header.addEventListener("click", () => {
+        const table = header.closest("table");
+        const tbody = table.querySelector("tbody");
+        const sortType = header.dataset.sort;
+        const isAscending = header.classList.toggle("ascending");
+        headers.forEach((h) => {
+          if (h !== header) {
+            h.classList.remove("ascending", "descending", "sort-active");
+          }
+        });
+        header.classList.toggle("descending", !isAscending);
+        header.classList.add("sort-active");
+        table.className = table.className.replace(/sorted-by-\w+/g, "");
+        table.classList.add(`sorted-by-${sortType}`);
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.sort((a, b) => {
+          let aValue = a.dataset[sortType];
+          let bValue = b.dataset[sortType];
+          if (sortType === "name") {
+            aValue = aValue.toLowerCase();
+            bValue = bValue.toLowerCase();
+          } else if (sortType !== "name") {
+            aValue = parseFloat(aValue);
+            bValue = parseFloat(bValue);
+          }
+          if (aValue < bValue)
+            return isAscending ? -1 : 1;
+          if (aValue > bValue)
+            return isAscending ? 1 : -1;
+          return 0;
+        });
+        rows.forEach((row) => tbody.appendChild(row));
+      });
+    });
   }
   function generateBarGroups(ratingBuckets) {
-    const totalPerformers = ratingBuckets.reduce((s, c) => s + c, 0);
-    const maxBucket = Math.max(...ratingBuckets, 1);
-    const isClustered = totalPerformers > 0 && maxBucket / totalPerformers > 0.5;
-    if (isClustered) {
-      const grouped = [];
-      for (let i = 0; i <= 100; i += 5) {
-        const count = ratingBuckets.slice(i, i + 5).reduce((s, c) => s + c, 0);
-        grouped.push({ label: `${i}\u2013${Math.min(i + 4, 100)}`, count });
-      }
-      const groupMax = Math.max(...grouped.map((g) => g.count), 1);
-      return grouped.map(({ label, count }) => {
-        if (count === 0)
-          return "";
-        const percentage = count / groupMax * 100;
-        return `
-        <div class="hon-bar-container" title="Rating ${label}: ${count} performers">
-          <div class="hon-bar-label" style="min-width:60px">${label}</div>
-          <div class="hon-bar-wrapper">
-            <div class="hon-bar" style="width: ${percentage}%">
-              ${count > 2 ? `<span class="hon-bar-count">${count}</span>` : ""}
-            </div>
-          </div>
-        </div>`;
-      }).join("");
-    }
-    return ratingBuckets.map((count, i) => {
-      if (count === 0)
+    const tiers = [
+      { label: "S-Tier", min: 85, max: 100, color: "#eb9834" },
+      { label: "A-Tier", min: 70, max: 84, color: "#e014aa" },
+      { label: "B-Tier", min: 55, max: 69, color: "#7f1e82" },
+      { label: "C-Tier", min: 40, max: 54, color: "#14bbe0" },
+      { label: "D-Tier", min: 25, max: 39, color: "#92e014" },
+      { label: "F-Tier", min: 0, max: 24, color: "#808080" }
+    ];
+    const tierStats = tiers.map((tier) => {
+      const count = ratingBuckets.slice(tier.min, tier.max + 1).reduce((sum, val) => sum + val, 0);
+      return { ...tier, count };
+    });
+    const maxCount = Math.max(...tierStats.map((t) => t.count), 1);
+    return tierStats.map((tier) => {
+      if (tier.count === 0)
         return "";
-      const percentage = count / maxBucket * 100;
+      const percentage = tier.count / maxCount * 100;
       return `
-      <div class="hon-bar-container" title="Rating ${i}: ${count} performers">
-        <div class="hon-bar-label">${i}</div>
+      <div class="hon-bar-container" title="${tier.label} (${tier.min}-${tier.max}): ${tier.count} performers">
+        <div class="hon-bar-label-wrapper">
+          <span class="hon-bar-label">${tier.label}</span>
+        </div>
         <div class="hon-bar-wrapper">
-          <div class="hon-bar" style="width: ${percentage}%">
-            ${count > 5 ? `<span class="hon-bar-count">${count}</span>` : ""}
+          <div class="hon-bar" style="width: ${percentage}%; background-color: ${tier.color}">
+            <span class="hon-bar-count">${tier.count}</span>
           </div>
         </div>
       </div>`;
@@ -2126,6 +2664,7 @@
   var ui_modal_exports = {};
   __export(ui_modal_exports, {
     addFloatingButton: () => addFloatingButton,
+    cleanupButtonObserver: () => cleanupButtonObserver,
     closeRankingModal: () => closeRankingModal,
     getPerformerIdFromUrl: () => getPerformerIdFromUrl,
     isOnSinglePerformerPage: () => isOnSinglePerformerPage,
@@ -2150,10 +2689,8 @@
   function addFloatingButton() {
     const buttonId = "plugin_hon";
     const existing = document.getElementById(buttonId);
-    if (!shouldShowButton()) {
-      if (existing)
-        existing.closest(".col-4")?.remove();
-      return;
+    function shouldShowButton2() {
+      return true;
     }
     if (existing)
       return;
@@ -2176,34 +2713,53 @@
   `;
     const button = buttonContainer.querySelector(`#${buttonId}`);
     button.addEventListener("click", openRankingModal);
-    const navTarget2 = document.querySelector(".navbar-nav");
-    if (navTarget2)
-      navTarget2.appendChild(buttonContainer);
+    const navTarget = document.querySelector(".navbar-nav");
+    if (navTarget)
+      navTarget.appendChild(buttonContainer);
   }
   function watchForNavigation() {
-    const observer2 = new MutationObserver(() => {
+    if (buttonObserver) {
+      buttonObserver.disconnect();
+    }
+    buttonObserver = new MutationObserver(() => {
       addFloatingButton();
     });
-    observer2.observe(document.body, {
+    buttonObserver.observe(document.body, {
       childList: true,
       subtree: true
     });
   }
+  function cleanupButtonObserver() {
+    if (buttonObserver) {
+      buttonObserver.disconnect();
+      buttonObserver = null;
+    }
+  }
+  function closeRankingModal() {
+    const gameModal = document.getElementById("hon-modal");
+    const statsModal = document.getElementById("hon-stats-modal");
+    if (gameModal)
+      gameModal.remove();
+    if (statsModal)
+      statsModal.remove();
+    document.removeEventListener("keydown", handleGlobalKeys, { capture: true });
+    cleanupButtonObserver();
+    clearDOMCache();
+  }
   function handleGlobalKeys(e) {
     const activeModal = document.getElementById("hon-modal");
     if (!activeModal) {
-      document.removeEventListener("keydown", handleGlobalKeys);
+      document.removeEventListener("keydown", handleGlobalKeys, { capture: true });
       return;
     }
+    e.stopPropagation();
     if (e.key === "Escape" || e.key === "Esc") {
       e.preventDefault();
-      e.stopImmediatePropagation();
       closeRankingModal();
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
       e.preventDefault();
-      e.stopImmediatePropagation();
       Promise.resolve().then(() => (init_match_handler(), match_handler_exports)).then((m) => m.handleUndo());
       return;
     }
@@ -2213,11 +2769,17 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.key === "ArrowLeft") {
-        activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body')?.click();
+        const leftCard = activeModal.querySelector('.hon-scene-card[data-side="left"] .hon-scene-body');
+        if (leftCard) {
+          leftCard.click();
+        }
       } else if (e.key === "ArrowRight") {
-        activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body')?.click();
+        const rightCard = activeModal.querySelector('.hon-scene-card[data-side="right"] .hon-scene-body');
+        if (rightCard) {
+          rightCard.click();
+        }
       } else if (isSpace) {
-        const skipBtn = document.getElementById("hon-skip-btn") || activeModal.querySelector(".hon-gauntlet-skip");
+        const skipBtn = document.getElementById("hon-skip-btn");
         if (skipBtn) {
           skipBtn.click();
         }
@@ -2239,8 +2801,14 @@
       </div>
     `;
       document.body.appendChild(modal);
-      modal.querySelector(".hon-modal-close").onclick = () => closeRankingModal();
-      modal.querySelector(".hon-modal-backdrop").onclick = () => closeRankingModal();
+      const closeModalBtn = modal.querySelector(".hon-modal-close");
+      if (closeModalBtn) {
+        closeModalBtn.onclick = () => closeRankingModal();
+      }
+      const modalBackdrop = modal.querySelector(".hon-modal-backdrop");
+      if (modalBackdrop) {
+        modalBackdrop.onclick = () => closeRankingModal();
+      }
       attachEventListeners(modal);
       if (state.currentMode === "gauntlet") {
         if (state.gauntletChampion) {
@@ -2267,6 +2835,12 @@
   }
   async function openRankingModal() {
     try {
+      const navbarToggle = document.querySelector(".navbar-toggler");
+      if (navbarToggle && !navbarToggle.classList.contains("collapsed")) {
+        navbarToggle.click();
+      }
+      state.gauntletChampion = null;
+      state.battleType = "performers";
       const path = window.location.pathname;
       const performerMatch = path.match(/\/performers\/(\d+)/);
       const isSinglePerformerPage = !!performerMatch;
@@ -2277,7 +2851,6 @@
           _buildAndOpenModal();
           return;
         }
-        state.battleType = "performers";
         state.currentMode = "gauntlet";
         const { fetchPerformerById: fetchPerformerById2 } = await Promise.resolve().then(() => (init_api_client(), api_client_exports));
         try {
@@ -2290,44 +2863,31 @@
             state.gauntletFallingItem = null;
           }
         } catch (e) {
-          console.warn("[HotOrNot] Could not pre-seed performer:", e);
+          console.warn("[HotOrNot] Could not preload performer:", e);
         }
       } else {
-        state.battleType = path.includes("/images") ? "images" : "performers";
         state.currentMode = "swiss";
-        state.gauntletChampion = null;
       }
       _buildAndOpenModal();
     } catch (err) {
       console.error("CRASH in openRankingModal:", err);
     }
   }
-  function closeRankingModal() {
-    const gameModal = document.getElementById("hon-modal");
-    const statsModal = document.getElementById("hon-stats-modal");
-    if (gameModal)
-      gameModal.remove();
-    if (statsModal)
-      statsModal.remove();
-    document.removeEventListener("keydown", handleGlobalKeys, { capture: true });
-  }
-  var navTarget;
+  var buttonObserver;
   var init_ui_modal = __esm({
     "ui-modal.js"() {
       init_state();
       init_battle_engine();
       init_ui_dashboard();
+      init_dom_utils();
+      buttonObserver = null;
+      window._honCleanupButtonObserver = cleanupButtonObserver;
       watchForNavigation();
-      addFloatingButton();
-      navTarget = document.querySelector(".navbar-nav");
-      if (navTarget) {
-        const observer2 = new MutationObserver(() => {
-          addFloatingButton();
-        });
-        observer2.observe(navTarget, { childList: true, subtree: true });
-      }
       ["popstate"].forEach(
-        (event) => window.addEventListener(event, addFloatingButton)
+        (event) => window.addEventListener(event, () => {
+          watchForNavigation();
+          addFloatingButton();
+        })
       );
     }
   });
@@ -2390,36 +2950,54 @@
     </div>`;
   }
   function attachEventListeners(parent = document) {
-    parent.querySelector("#hon-stats-btn")?.addEventListener("click", () => {
-      Promise.resolve().then(() => (init_ui_stats(), ui_stats_exports)).then((m) => m.openStatsModal());
-    });
-    parent.querySelectorAll(".hon-performer-link, .hon-gauntlet-select-img").forEach((link) => {
+    const statsBtn = parent.querySelector("#hon-stats-btn");
+    if (statsBtn) {
+      statsBtn.addEventListener("click", () => {
+        Promise.resolve().then(() => (init_ui_stats(), ui_stats_exports)).then((m) => m.openStatsModal());
+      });
+    }
+    const performerLinks = parent.querySelectorAll(".hon-performer-link, .hon-gauntlet-select-img");
+    performerLinks.forEach((link) => {
       link.addEventListener("click", (e) => e.stopPropagation());
     });
     const skipBtn = parent.querySelector("#hon-skip-btn");
     if (skipBtn) {
-      const isSkippableMode = state.currentMode === "swiss" || state.currentMode === "gauntlet";
-      skipBtn.style.display = isSkippableMode ? "block" : "none";
-      skipBtn.onclick = () => {
-        if (state.currentMode === "swiss" || state.currentMode === "gauntlet") {
-          handleSkip();
-        }
+      const updateSkipButtonVisibility = () => {
+        const isSkippableMode = state.currentMode === "swiss" || state.currentMode === "gauntlet";
+        skipBtn.style.display = isSkippableMode ? "inline-block" : "none";
       };
+      updateSkipButtonVisibility();
+      const newSkipBtn = skipBtn.cloneNode(true);
+      skipBtn.parentNode.replaceChild(newSkipBtn, skipBtn);
+      newSkipBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isSkippableMode = state.currentMode === "swiss" || state.currentMode === "gauntlet";
+        if (isSkippableMode) {
+          const { handleSkip: handleSkip2 } = await Promise.resolve().then(() => (init_match_handler(), match_handler_exports));
+          handleSkip2();
+        }
+      });
     }
     const undoBtn = parent.querySelector("#hon-undo-btn");
     if (undoBtn) {
       undoBtn.onclick = () => handleUndo();
       undoBtn.style.display = state.matchHistory && state.matchHistory.length > 0 ? "inline-block" : "none";
     }
-    parent.querySelectorAll(".hon-gender-btn").forEach((btn) => {
+    const genderButtons = parent.querySelectorAll(".hon-gender-btn");
+    genderButtons.forEach((btn) => {
       btn.addEventListener("click", () => handleGenderToggle(btn.dataset.gender));
     });
-    parent.querySelectorAll(".hon-mode-btn").forEach((btn) => {
+    const modeButtons = parent.querySelectorAll(".hon-mode-btn");
+    modeButtons.forEach((btn) => {
       btn.addEventListener("click", async () => {
         const newMode = btn.dataset.mode;
         if (state.currentMode === newMode)
           return;
         state.currentMode = newMode;
+        modeButtons.forEach((button) => {
+          button.classList.toggle("active", button.dataset.mode === newMode);
+        });
         const { getPerformerIdFromUrl: getPerformerIdFromUrl2 } = await Promise.resolve().then(() => (init_ui_modal(), ui_modal_exports));
         const urlPerformerId = getPerformerIdFromUrl2();
         if (!urlPerformerId || state.gauntletChampion && state.gauntletChampion.id.toString() !== urlPerformerId) {
@@ -2428,30 +3006,66 @@
           state.gauntletDefeated = [];
           state.gauntletFalling = false;
         }
-        const modalContent = document.querySelector(".hon-modal-content");
-        if (modalContent) {
-          modalContent.innerHTML = `<span class="hon-modal-close">\u2715</span>${createMainUI()}`;
-          attachEventListeners(modalContent);
-          modalContent.querySelector(".hon-modal-close").onclick = () => Promise.resolve().then(() => (init_ui_modal(), ui_modal_exports)).then((m) => m.closeRankingModal());
+        const modal = document.getElementById("hon-modal");
+        if (modal) {
+          modal.classList.remove("hon-mode-champion", "hon-mode-swiss", "hon-mode-gauntlet");
+          modal.classList.add(`hon-mode-${newMode}`);
         }
-        if (newMode === "gauntlet") {
+        const selectionContainer = document.getElementById("hon-performer-selection");
+        const comparisonArea = document.getElementById("hon-comparison-area");
+        const actionsEl = document.querySelector(".hon-actions");
+        if (newMode === "swiss") {
+          if (selectionContainer)
+            selectionContainer.style.display = "none";
+          if (comparisonArea)
+            comparisonArea.style.display = "";
+          if (actionsEl)
+            actionsEl.style.display = "";
+          loadNewPair();
+        } else if (newMode === "gauntlet") {
           if (urlPerformerId && !state.gauntletChampion) {
             const { fetchPerformerById: fetchPerformerById2 } = await Promise.resolve().then(() => (init_api_client(), api_client_exports));
             state.gauntletChampion = await fetchPerformerById2(urlPerformerId);
           }
           if (state.gauntletChampion) {
-            const selEl = document.getElementById("hon-performer-selection");
-            const compEl = document.getElementById("hon-comparison-area");
-            if (selEl)
-              selEl.style.display = "none";
-            if (compEl)
-              compEl.style.display = "";
+            if (selectionContainer)
+              selectionContainer.style.display = "none";
+            if (comparisonArea)
+              comparisonArea.style.display = "";
+            if (actionsEl)
+              actionsEl.style.display = "";
             loadNewPair();
           } else {
-            window.showPerformerSelection();
+            if (selectionContainer)
+              selectionContainer.style.display = "block";
+            if (comparisonArea)
+              comparisonArea.style.display = "none";
+            if (actionsEl)
+              actionsEl.style.display = "none";
+            Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.loadPerformerSelection());
           }
-        } else {
-          loadNewPair();
+        } else if (newMode === "champion") {
+          if (urlPerformerId && !state.gauntletChampion) {
+            const { fetchPerformerById: fetchPerformerById2 } = await Promise.resolve().then(() => (init_api_client(), api_client_exports));
+            state.gauntletChampion = await fetchPerformerById2(urlPerformerId);
+          }
+          if (state.gauntletChampion) {
+            if (selectionContainer)
+              selectionContainer.style.display = "none";
+            if (comparisonArea)
+              comparisonArea.style.display = "";
+            if (actionsEl)
+              actionsEl.style.display = "";
+            loadNewPair();
+          } else {
+            if (selectionContainer)
+              selectionContainer.style.display = "block";
+            if (comparisonArea)
+              comparisonArea.style.display = "none";
+            if (actionsEl)
+              actionsEl.style.display = "none";
+            Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.loadPerformerSelection());
+          }
         }
       });
     });
@@ -2462,15 +3076,25 @@
     } else {
       state.selectedGenders.push(gender);
     }
+    try {
+      localStorage.setItem("hotornot_selected_genders", JSON.stringify(state.selectedGenders));
+    } catch (e) {
+      console.warn("[HotOrNot] Could not save gender selection to localStorage:", e);
+    }
     console.log(`[HotOrNot] Gender Filter Updated: ${state.selectedGenders.join(", ")}`);
-    document.querySelectorAll(`.hon-gender-btn[data-gender="${gender}"]`).forEach((btn) => {
+    const genderBtns = document.querySelectorAll(`.hon-gender-btn[data-gender="${gender}"]`);
+    genderBtns.forEach((btn) => {
       btn.classList.toggle("active", state.selectedGenders.includes(gender));
     });
     loadNewPair();
   }
   function setMode(mode) {
-    document.getElementById("hon-performer-selection").style.display = "none";
-    document.getElementById("hon-comparison-area").style.display = "none";
+    const selEl = document.getElementById("hon-performer-selection");
+    const compEl = document.getElementById("hon-comparison-area");
+    if (selEl)
+      selEl.style.display = "none";
+    if (compEl)
+      compEl.style.display = "none";
     if (mode === "gauntlet") {
       Promise.resolve().then(() => (init_gauntlet_selection(), gauntlet_selection_exports)).then((m) => m.showPerformerSelection());
     }
@@ -2478,6 +3102,7 @@
   var init_ui_dashboard = __esm({
     "ui-dashboard.js"() {
       init_state();
+      init_dom_utils();
       init_constants();
       init_battle_engine();
       init_match_handler();
@@ -2612,7 +3237,7 @@ Match Stats:`;
       <h3 class="hon-victory-name">${title}</h3>
       <p class="hon-victory-stats">
         Rank <strong>#${rank}</strong> of ${totalItemsCount}<br>
-        Rating: <strong>${finalRating}/100</strong>
+        Rating: <strong>${(finalRating / 10).toFixed(1)}/10.0</strong>  <!-- Changed this line -->
       </p>
       <button id="hon-new-gauntlet" class="btn btn-primary">Start New Run</button>
     </div>
@@ -2637,10 +3262,11 @@ Match Stats:`;
     overlay.className = `hon-rating-overlay ${isWinner ? "hon-rating-winner" : "hon-rating-loser"}`;
     const ratingDisplay = document.createElement("div");
     ratingDisplay.className = "hon-rating-display";
-    ratingDisplay.textContent = oldRating;
+    ratingDisplay.textContent = (oldRating / 10).toFixed(1);
     const changeDisplay = document.createElement("div");
     changeDisplay.className = "hon-rating-change";
-    changeDisplay.textContent = (change >= 0 ? "+" : "") + change;
+    const decimalChange = change / 10;
+    changeDisplay.textContent = (decimalChange >= 0 ? "+" : "") + decimalChange.toFixed(1);
     overlay.appendChild(ratingDisplay);
     overlay.appendChild(changeDisplay);
     card.appendChild(overlay);
@@ -2648,14 +3274,14 @@ Match Stats:`;
     if (totalSteps > 0) {
       const step = isWinner ? 1 : -1;
       let stepCount = 0;
-      let currentDisplay = oldRating;
+      let currentRating = oldRating;
       const interval = setInterval(() => {
         stepCount++;
-        currentDisplay += step;
-        ratingDisplay.textContent = currentDisplay;
+        currentRating += step;
+        ratingDisplay.textContent = (currentRating / 10).toFixed(1);
         if (stepCount >= totalSteps) {
           clearInterval(interval);
-          ratingDisplay.textContent = newRating;
+          ratingDisplay.textContent = (newRating / 10).toFixed(1);
         }
       }, 30);
     }
@@ -2719,103 +3345,62 @@ Match Stats:`;
   window.handleGenderToggle = handleGenderToggle;
   window.showPerformerSelection = showPerformerSelection;
   window.handleChooseItem = handleChooseItem;
+  window.handleGenderToggle = handleGenderToggle;
   var lastPath = "";
-  function parseGendersFromCurrentUrl() {
-    try {
-      let normalizeGender = function(raw) {
-        const key = String(raw).toLowerCase().trim();
-        if (Object.values(LABEL_TO_ENUM).includes(raw.toUpperCase()))
-          return raw.toUpperCase();
-        return LABEL_TO_ENUM[key] || raw.toUpperCase().replace(/[\s-]+/g, "_");
-      };
-      const urlParams = new URLSearchParams(window.location.search);
-      const criteriaParams = urlParams.getAll("c");
-      if (!criteriaParams.length)
-        return null;
-      const LABEL_TO_ENUM = {
-        "female": "FEMALE",
-        "male": "MALE",
-        "transgender male": "TRANSGENDER_MALE",
-        "transgender female": "TRANSGENDER_FEMALE",
-        "trans male": "TRANSGENDER_MALE",
-        "trans female": "TRANSGENDER_FEMALE",
-        "intersex": "INTERSEX",
-        "non-binary": "NON_BINARY",
-        "nonbinary": "NON_BINARY",
-        "non_binary": "NON_BINARY"
-      };
-      for (const param of criteriaParams) {
-        let raw = decodeURIComponent(param).trim();
-        raw = raw.replace(/^\(/, "{").replace(/\)$/, "}");
-        let criterion;
-        try {
-          criterion = JSON.parse(raw);
-        } catch {
-          continue;
-        }
-        if (criterion.type !== "gender")
-          continue;
-        const val = criterion.value;
-        if (!val)
-          continue;
-        const arr = Array.isArray(val) ? val : [val];
-        const enums = arr.map(normalizeGender).filter(Boolean);
-        if (enums.length > 0)
-          return enums;
-      }
-      return null;
-    } catch (e) {
-      console.warn("[HotOrNot] parseGendersFromCurrentUrl error:", e);
-      return null;
-    }
-  }
   function syncGendersFromPerformersPage() {
-    const path = window.location.pathname;
-    const isListPage = path === "/performers" || path === "/performers/";
-    if (!isListPage)
-      return;
-    const detectedGenders = parseGendersFromCurrentUrl();
-    if (detectedGenders && detectedGenders.length > 0) {
-      state.selectedGenders = detectedGenders;
-      console.log("[HotOrNot] Auto-synced genders from URL filter:", state.selectedGenders);
-    }
   }
-  var observer = new MutationObserver(() => {
-    const currentPath = window.location.pathname;
-    const existingBtn = document.getElementById("hon-floating-btn");
-    if (existingBtn) {
-      if (!shouldShowButton()) {
-        existingBtn.remove();
+  (function initializeSelectedGendersFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem("hotornot_selected_genders");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          state.selectedGenders = parsed;
+        }
       }
-    } else if (shouldShowButton()) {
-      addFloatingButton();
+    } catch (e) {
+      console.warn("[HotOrNot] Failed to load selected genders from localStorage:", e);
     }
-    if (isOnSinglePerformerPage2()) {
-      const badgeExists = !!document.getElementById("hon-battle-rank-badge");
-      if (currentPath !== lastPath || !badgeExists) {
-        lastPath = currentPath;
-        setTimeout(() => {
-          if (!document.getElementById("hon-battle-rank-badge")) {
-            injectBattleRankBadge();
-          }
-        }, 300);
-      }
-    }
-    const container = document.getElementById("stash-main-container");
-    if (container && !document.getElementById("hotornot-container")) {
-      container.innerHTML = createMainUI();
-      attachEventListeners(container);
-    }
-  });
+  })();
+  var observer = null;
   function main() {
     if (window.honLoaded)
       return;
     window.honLoaded = true;
     console.log("[HotOrNot] Global Scope Initialized");
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+    if (!observer) {
+      observer = new MutationObserver(() => {
+        const currentPath = window.location.pathname;
+        const existingBtn = document.getElementById("hon-floating-btn");
+        if (existingBtn) {
+          if (!shouldShowButton()) {
+            existingBtn.remove();
+          }
+        } else if (shouldShowButton()) {
+          addFloatingButton();
+        }
+        if (isOnSinglePerformerPage2()) {
+          const badgeExists = !!document.getElementById("hon-battle-rank-badge");
+          if (currentPath !== lastPath || !badgeExists) {
+            lastPath = currentPath;
+            setTimeout(() => {
+              if (!document.getElementById("hon-battle-rank-badge")) {
+                injectBattleRankBadge();
+              }
+            }, 300);
+          }
+        }
+        const container = document.getElementById("stash-main-container");
+        if (container && !document.getElementById("hotornot-container")) {
+          container.innerHTML = createMainUI();
+          attachEventListeners(container);
+        }
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
     if (isOnSinglePerformerPage2()) {
       setTimeout(() => injectBattleRankBadge(), 1e3);
     }
@@ -2831,6 +3416,19 @@ Match Stats:`;
           setTimeout(syncGendersFromPerformersPage, 100);
         }
       });
+    }
+  }
+  function cleanup() {
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    try {
+      if (typeof window._honCleanupButtonObserver === "function") {
+        window._honCleanupButtonObserver();
+      }
+    } catch (e) {
+      console.debug("[HotOrNot] Button observer cleanup not available");
     }
   }
   main();

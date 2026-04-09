@@ -123,6 +123,10 @@
   color: #dc3545;
   text-shadow: 0 0 20px rgba(220, 53, 69, 0.5);
 }
+#hon-stats-btn {
+  margin-top: 10px !important;
+  margin-bottom: 15px !important;
+}
 .hon-scene-card:hover {
   border-color: #0d6efd;
   transform: translateY(-5px);
@@ -1153,6 +1157,7 @@
   display: grid;
   grid-template-columns: 60px 1fr;
   align-items: center;
+  margin-bottom: 8px;
   gap: 10px;
 }
 .hon-bar-label {
@@ -1162,18 +1167,12 @@
   font-weight: 500;
 }
 .hon-bar-wrapper {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  height: 32px;
-  position: relative;
-  overflow: hidden;
+  flex: 1;
+  min-width: 0;
 }
 .hon-bar {
-  background:
-    linear-gradient(
-      90deg,
-      #0d6efd 0%,
-      #0a58ca 100%);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.15) 0%, rgba(0, 0, 0, 0.1) 100%);
+  background-color: #808080;
   height: 100%;
   border-radius: 4px;
   display: flex;
@@ -1191,8 +1190,12 @@
 }
 @media (max-width: 768px) {
   .hon-stats-modal-dialog {
-    max-width: 98%;
-    padding: 20px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    width: 95%;
+    margin: 20px auto;
   }
   .hon-stats-title {
     font-size: 1.5rem;
@@ -1200,8 +1203,16 @@
   .hon-stats-summary {
     grid-template-columns: 1fr 1fr;
   }
+  .hon-stats-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px;
+  }
   .hon-stats-table {
-    font-size: 0.85rem;
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
   }
   .hon-stats-table th,
   .hon-stats-table td {
@@ -1211,17 +1222,23 @@
     padding: 10px 16px;
     font-size: 0.9rem;
   }
-  .hon-bar-container {
-    grid-template-columns: 50px 1fr;
+  .hon-bar-label-wrapper {
+    flex: 0 0 auto;
+    text-align: left;
+    padding-right: 0;
+    padding-bottom: 4px;
   }
   .hon-bar-label {
-    font-size: 0.85rem;
+    font-size: 13px;
+  }
+  .hon-bar-wrapper {
+    width: 100%;
+  }
+  .hon-bar-count {
+    font-size: 11px;
   }
   .hon-bar {
     height: 28px;
-  }
-  .hon-bar-count {
-    font-size: 0.85rem;
   }
   .hon-bar-group-label {
     font-size: 0.85rem;
@@ -1420,19 +1437,6 @@
   background: rgba(0, 0, 0, 0.7);
   z-index: 1040;
 }
-.hon-stats-modal-dialog {
-  z-index: 5100 !important;
-  position: relative;
-  color: white !important;
-  padding: 25px;
-  border-radius: 8px;
-  border: 1px solid #444;
-  max-height: 90vh;
-  overflow-y: auto;
-  width: 90%;
-  max-width: 900px;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-}
 .quality-group {
   display: flex;
   align-items: center;
@@ -1450,4 +1454,102 @@
 .hon-hint {
   display: inline-block;
   margin: 0 5px;
+}
+.hon-meta-placeholder {
+  visibility: hidden;
+  min-height: 1.5em;
+}
+.hon-performer-meta {
+  min-height: 120px;
+}
+.hon-tags-more {
+  color: #007bff;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.hon-tags-more:hover {
+  color: #0056b3;
+}
+.hon-tags-container {
+  cursor: default;
+}
+.hon-performer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.hon-performer-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.hon-performer-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.hon-choose-btn {
+  margin-top: auto;
+}
+.hon-stats-table th {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 20px;
+}
+.hon-stats-table th::after {
+  content: "\2195";
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.3;
+  font-size: 0.8em;
+  transition: opacity 0.2s ease;
+}
+.hon-stats-table th:hover::after {
+  opacity: 0.7;
+}
+.hon-stats-table th.ascending::after {
+  content: "\2191";
+  opacity: 1;
+  color: #0d6efd;
+}
+.hon-stats-table th.descending::after {
+  content: "\2193";
+  opacity: 1;
+  color: #0d6efd;
+}
+.hon-stats-table th.sort-active {
+  background: rgba(13, 110, 253, 0.2) !important;
+  border-bottom-color: #0d6efd !important;
+}
+.hon-stats-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.15s ease;
+}
+.hon-stats-table.sorted-by-rank td:nth-child(1),
+.hon-stats-table.sorted-by-rating td:nth-child(3),
+.hon-stats-table.sorted-by-matches td:nth-child(4),
+.hon-stats-table.sorted-by-wins td:nth-child(5),
+.hon-stats-table.sorted-by-losses td:nth-child(6),
+.hon-stats-table.sorted-by-draws td:nth-child(7),
+.hon-stats-table.sorted-by-winrate td:nth-child(8),
+.hon-stats-table.sorted-by-streak td:nth-child(9),
+.hon-stats-table.sorted-by-beststreak td:nth-child(10),
+.hon-stats-table.sorted-by-worststreak td:nth-child(11) {
+  background: rgba(13, 110, 253, 0.05);
+}
+.hon-stats-table.sorted-by-rank tbody tr:hover td:nth-child(1),
+.hon-stats-table.sorted-by-rating tbody tr:hover td:nth-child(3),
+.hon-stats-table.sorted-by-matches tbody tr:hover td:nth-child(4),
+.hon-stats-table.sorted-by-wins tbody tr:hover td:nth-child(5),
+.hon-stats-table.sorted-by-losses tbody tr:hover td:nth-child(6),
+.hon-stats-table.sorted-by-draws tbody tr:hover td:nth-child(7),
+.hon-stats-table.sorted-by-winrate tbody tr:hover td:nth-child(8),
+.hon-stats-table.sorted-by-streak tbody tr:hover td:nth-child(9),
+.hon-stats-table.sorted-by-beststreak tbody tr:hover td:nth-child(10),
+.hon-stats-table.sorted-by-worststreak tbody tr:hover td:nth-child(11) {
+  background: rgba(13, 110, 253, 0.15);
 }

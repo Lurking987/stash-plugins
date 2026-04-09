@@ -1,14 +1,35 @@
-name: HotOrNot_V3
-description: Adds an ELO based ranking system for performers and images
-version: 3.1.0
+name: HotOrNot V3
+description: Adds an ELO based ranking system for performers and images. Complete with a full dynamic matchmaking system, leaderboards, and metrics.
+version: 3.2.1
 url: https://github.com/Lurking987/stash-plugins/pull/5
+exec:
+  - python
+  - "{pluginDir}/jumper.py"
+
 ui: 
   javascript:
     - hot_or_not.js
   css:
     - hot_or_not.css
+    
+interface: raw
+
+tasks:
+  - name: "Wipe Performer Match History"
+    description: Deletes all Performer Hot or Not Match history from custom fields. 
+    defaultArgs:
+      mode: processAll
+      task: wipe
+
+  - name: "Reset All Performer Ratings"
+    description: Resets all Performer ratings to 0. 
+    defaultArgs:
+      mode: processAll
+      task: reset
+
 settings:
   showBattleRankBadge:
     displayName: Show Battle Rank Badge
     description: Show a rank badge on individual performer pages. Enabled by default.
     type: BOOLEAN
+    
